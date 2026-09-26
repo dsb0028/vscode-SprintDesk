@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import { buildSprintCalendar } from '../../calendar/sprintCalendar';
 import { renderSprintCalendarHtml } from '../../calendar/sprintCalendarHtml';
+import { initialCalendarState, localCalendarDate, updateCalendarState } from '../../calendar/sprintCalendarState';
 import { getDataService } from '../../data/DataService';
 
 export function registerShowSprintCalendarCommand(context: vscode.ExtensionContext) {
@@ -23,12 +24,28 @@ export function registerShowSprintCalendarCommand(context: vscode.ExtensionConte
         'sprintdesk-sprint-calendar',
         'Sprint Calendar',
         vscode.ViewColumn.One,
-        { enableScripts: false },
+        { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [] },
       );
-      panel.webview.html = renderSprintCalendarHtml(
-        calendar,
-        randomBytes(16).toString('base64'),
-      );
+      let state = initialCalendarState(localCalendarDate());
+      const render = () => {
+        panel.webview.html = renderSprintCalendarHtml(calendar, randomBytes(16).toString('base64'), {
+          state, today: localCalendarDate(),
+        });
+      };
+      const messages = panel.webview.onDidReceiveMessage((message: unknown) => {
+        const next = updateCalendarState(state, message, localCalendarDate());
+        if (!next) {
+          return;
+        }
+        state = next;
+        render();
+      });
+      const disposal = panel.onDidDispose(() => {
+        messages.dispose();
+        disposal.dispose();
+      });
+      context.subscriptions.push(panel);
+      render();
     })
   );
 }

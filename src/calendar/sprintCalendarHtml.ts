@@ -1,159 +1,259 @@
 import { CalendarSprint, ScheduledTask, SprintCalendar } from './sprintCalendar';
+import { buildMonthLayout, CalendarSegment, CalendarWeek, SPRINT_LANES, TASK_LANES } from './sprintCalendarLayout';
+import { CalendarViewState, initialCalendarState, localCalendarDate } from './sprintCalendarState';
 
 function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function getCalendarDays(startDate: string, endDate: string): string[] {
-  const days: string[] = [];
-  const cursor = new Date(`${startDate}T00:00:00Z`);
-  const end = new Date(`${endDate}T00:00:00Z`);
-
-  while (cursor <= end) {
-    days.push(cursor.toISOString().slice(0, 10));
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
-  }
-
-  return days;
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function formatDate(date: string): string {
-  return new Intl.DateTimeFormat('en', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    timeZone: 'UTC',
-  }).format(new Date(`${date}T00:00:00Z`));
+  return new Intl.DateTimeFormat('en', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+    .format(new Date(`${date}T00:00:00Z`));
 }
 
-function renderSprintCard(sprint: CalendarSprint): string {
+function renderSprintCard(sprint: CalendarSprint, calendar: SprintCalendar): string {
+  const scheduled = new Map(calendar.tasks.map(task => [task.id, task]));
   const taskList = sprint.tasks.length
-    ? `<ul>${sprint.tasks.map((task) => (
-      `<li><strong>${escapeHtml(task.title)}</strong> `
-      + `<span>${escapeHtml(task.status)} · ${escapeHtml(task.priority)}</span></li>`
-    )).join('')}</ul>`
-    : '<p class="empty">No tasks are assigned to this sprint.</p>';
-
-  return `<article class="sprint-card">
-    <h2>${escapeHtml(sprint.title)}</h2>
-    <p>${formatDate(sprint.startDate)} – ${formatDate(sprint.endDate)}</p>
-    <p class="scope">Sprint membership only; tasks without planned dates are not shown on the calendar.</p>
-    ${taskList}
-  </article>`;
+    ? `<ul>${sprint.tasks.map(task => {
+      const dates = scheduled.get(task.id);
+      const timing = dates ? `${formatDate(dates.startDate)} – ${formatDate(dates.endDate)}`
+        : 'Not scheduled on calendar (undated or invalid dates)';
+      return `<li><strong>${escapeHtml(task.code)} · ${escapeHtml(task.title)}</strong>
+        <span>${escapeHtml(task.status)} · ${escapeHtml(task.priority)} · ${timing}</span></li>`;
+    }).join('')}</ul>`
+    : '<p class="muted">No tasks are assigned to this sprint.</p>';
+  return `<article class="sprint-card"><h3>${escapeHtml(sprint.title)}</h3>
+    <p>${formatDate(sprint.startDate)} – ${formatDate(sprint.endDate)}</p>${taskList}</article>`;
 }
 
-function renderTask(task: ScheduledTask, startColumn?: number, span?: number, weekStart?: string, weekEnd?: string): string {
-  const placement = startColumn === undefined ? '' : ` task-bar col-${startColumn} span-${span}`;
-  const continuesBefore = weekStart !== undefined && task.startDate < weekStart;
-  const continuesAfter = weekEnd !== undefined && task.endDate > weekEnd;
-  const range = `${formatDate(task.startDate)} – ${formatDate(task.endDate)}`;
-  return `<article class="task-card${placement}" aria-label="${escapeHtml(`${task.code}: ${task.title}; ${task.status}; ${range}`)}">
-    ${continuesBefore ? '<span class="continuation">Continued from previous week</span>' : ''}
-    <strong class="task-title" title="${escapeHtml(`${task.code}: ${task.title}`)}"><span class="task-code">${escapeHtml(task.code)}</span> ${escapeHtml(task.title)}</strong>
-    <span class="task-status">${escapeHtml(task.status)}</span>
-    <span class="task-range">${range}</span>
-    ${continuesAfter ? '<span class="continuation">Continues next week</span>' : ''}
-  </article>`;
+function renderSegment(
+  segment: CalendarSegment<CalendarSprint | ScheduledTask>, kind: 'sprint' | 'task', week: string, index: number,
+): string {
+  const item = segment.item;
+  const task = 'code' in item ? item : null;
+  const label = task ? `${task.code}: ${task.title}; ${task.status}; ${task.priority}` : item.title;
+  const before = segment.continuesBefore ? 'Continued from previous week. ' : '';
+  const after = segment.continuesAfter ? ' Continues next week.' : '';
+  const detail = `${label}; ${formatDate(item.startDate)} – ${formatDate(item.endDate)}. ${before}${after}`;
+  const id = `${kind}-${week}-${index}`;
+  return `<div class="segment ${kind}-bar col-${segment.column} span-${segment.span}" tabindex="0"
+      id="${id}" aria-label="${escapeHtml(detail)}" data-detail="${escapeHtml(detail)}">
+    ${segment.continuesBefore ? '<span class="continuation" aria-hidden="true">‹</span>' : ''}
+    <span class="bar-title">${task ? `<strong class="task-code">${escapeHtml(task.code)}</strong> ` : ''}${escapeHtml(item.title)}</span>
+    ${task ? `<span class="task-status">${escapeHtml(task.status)}</span>` : ''}
+    ${segment.continuesAfter ? '<span class="continuation" aria-hidden="true">›</span>' : ''}
+  </div>`;
 }
 
-function renderCalendarGrid(calendar: SprintCalendar): string {
-  if (!calendar.startDate || !calendar.endDate) {
-    return '<p class="empty">No sprints or tasks with valid date ranges are available.</p>';
-  }
+function renderLanes<T extends CalendarSprint | ScheduledTask>(
+  segments: CalendarSegment<T>[], kind: 'sprint' | 'task', week: CalendarWeek,
+  expanded: boolean, collapsedCount: number,
+): string {
+  const count = expanded ? Math.max(collapsedCount, ...segments.map(segment => segment.lane + 1)) : collapsedCount;
+  return `<div class="${kind}-lanes">${Array.from({ length: count }, (_, lane) => (
+    `<div class="lane ${kind}-lane">${segments.map((segment, index) => segment.lane === lane
+      ? renderSegment(segment, kind, week.id, index) : '').join('')}</div>`
+  )).join('')}</div>`;
+}
 
-  const firstDay = new Date(`${calendar.startDate}T00:00:00Z`);
-  firstDay.setUTCDate(firstDay.getUTCDate() - (firstDay.getUTCDay() + 6) % 7);
-  const lastDay = new Date(`${calendar.endDate}T00:00:00Z`);
-  lastDay.setUTCDate(lastDay.getUTCDate() + (7 - lastDay.getUTCDay()) % 7);
-  const days = getCalendarDays(firstDay.toISOString().slice(0, 10), lastDay.toISOString().slice(0, 10));
-  const weeks: string[] = [];
-  for (let offset = 0; offset < days.length; offset += 7) {
-    const week = days.slice(offset, offset + 7);
-    const weekStart = week[0];
-    const weekEnd = week[6];
-    const cells = week.map((day) => {
-      const labels = calendar.sprints.filter((sprint) => (
-        sprint.startDate <= day && day <= sprint.endDate
-      )).map((sprint) => (
-        `<span class="sprint-label">${escapeHtml(sprint.title)}</span>`
-      )).join('');
-      const cards = calendar.tasks.filter((task) => (
-        task.startDate === day && task.endDate === day
-      )).map((task) => renderTask(task)).join('');
-      return `<div class="day"><time datetime="${day}">${formatDate(day)}</time>${labels}${cards}</div>`;
-    }).join('');
-    const bars = calendar.tasks.filter((task) => (
-      task.startDate !== task.endDate && task.startDate <= weekEnd && task.endDate >= weekStart
-    )).map((task) => {
-      const start = task.startDate < weekStart ? 0 : week.indexOf(task.startDate);
-      const end = task.endDate > weekEnd ? 6 : week.indexOf(task.endDate);
-      return renderTask(task, start + 1, end - start + 1, weekStart, weekEnd);
-    }).join('');
-    weeks.push(`<div class="calendar-week" aria-label="Week of ${formatDate(weekStart)}">${cells}${bars}</div>`);
-  }
-
-  return `<section>
-    <h2>Calendar</h2>
-    <div class="calendar-scroll" role="region" aria-label="Task calendar" tabindex="0">
-      <div class="calendar-grid">
-        <div class="weekdays">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => `<strong>${day}</strong>`).join('')}</div>
-        ${weeks.join('')}
-      </div>
-    </div>
+function renderWeek(
+  week: CalendarWeek, state: CalendarViewState, sprintLanes: number, taskLanes: number,
+): string {
+  const expanded = state.expandedWeeks.includes(week.id);
+  const hidden = [
+    week.hiddenSprints ? `${week.hiddenSprints} more ${week.hiddenSprints === 1 ? 'sprint' : 'sprints'}` : '',
+    week.hiddenTasks ? `${week.hiddenTasks} more ${week.hiddenTasks === 1 ? 'task' : 'tasks'}` : '',
+  ].filter(Boolean).join(' · ');
+  return `<section class="calendar-week" aria-label="Week of ${formatDate(week.id)}">
+    <div class="day-columns" aria-hidden="true">${week.days.map((_, index) => `<div class="${index > 4 ? 'weekend' : ''}"></div>`).join('')}</div>
+    <div class="date-row">${week.days.map(day => `<div class="day${day.inMonth ? '' : ' adjacent'}${day.isToday ? ' today' : ''}">
+      <time datetime="${day.date}" ${day.isToday ? 'aria-current="date"' : ''} aria-label="${formatDate(day.date)}${day.isToday ? ', today' : ''}">${Number(day.date.slice(-2))}</time>
+    </div>`).join('')}</div>
+    <div id="week-${week.id}-lanes">${renderLanes(week.sprints, 'sprint', week, expanded, sprintLanes)}${renderLanes(week.tasks, 'task', week, expanded, taskLanes)}</div>
+    <div class="week-controls">${hidden ? `<button id="week-${week.id}-toggle" data-action="toggle" data-week="${week.id}"
+      aria-expanded="${expanded}" aria-controls="week-${week.id}-lanes"
+      aria-label="${expanded ? 'Collapse' : `Show ${hidden}`} for week of ${formatDate(week.id)}">${expanded ? 'Collapse week' : hidden}</button>` : ''}</div>
   </section>`;
 }
 
-export function renderSprintCalendarHtml(calendar: SprintCalendar, nonce: string): string {
-  const sprintCards = calendar.sprints.length
-    ? calendar.sprints.map(renderSprintCard).join('')
-    : '<p class="empty">No sprints with valid date ranges are available.</p>';
+export interface CalendarRenderOptions {
+  state?: CalendarViewState;
+  today?: string;
+}
 
+/** Pure HTML entry point; pass explicit state/today for deterministic previews. */
+export function renderSprintCalendarHtml(
+  calendar: SprintCalendar, nonce: string, options: CalendarRenderOptions = {},
+): string {
+  if (!/^[A-Za-z0-9+/_=-]+$/.test(nonce)) {
+    throw new Error('Invalid calendar nonce.');
+  }
+  const today = options.today ?? localCalendarDate();
+  const state = options.state ?? initialCalendarState(today);
+  const layout = buildMonthLayout(calendar, state.month, today);
+  const sprintLanes = Math.min(SPRINT_LANES, layout.weeks.reduce((count, week) => (
+    week.sprints.reduce((lanes, segment) => Math.max(lanes, segment.lane + 1), count)
+  ), 0));
+  const taskLanes = Math.min(TASK_LANES, layout.weeks.reduce((count, week) => (
+    week.tasks.reduce((lanes, segment) => Math.max(lanes, segment.lane + 1), count)
+  ), 0));
+  const monthLabel = new Intl.DateTimeFormat('en', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+    .format(new Date(`${state.month}-01T00:00:00Z`));
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}';">
-  <title>Sprint Calendar</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+  <title>${monthLabel} · Sprint Calendar</title>
   <style nonce="${nonce}">
-    body { color: var(--vscode-editor-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); margin: 0; padding: 24px; }
-    h1 { margin-top: 0; }
-    h2 { margin-bottom: 4px; }
-    .calendar-scroll { overflow-x: auto; }
-    .calendar-grid { min-width: 840px; }
-    .calendar-week, .weekdays { display: grid; gap: 6px; grid-template-columns: repeat(7, minmax(0, 1fr)); }
-    .calendar-week { margin-top: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--vscode-panel-border); }
-    .weekdays { text-align: center; }
-    .day { min-width: 0; grid-row: 1; }
-    .day, .sprint-card { border: 1px solid var(--vscode-panel-border); border-radius: 4px; padding: 10px; }
-    .day time { display: block; font-weight: 600; }
-    .sprint-label { background: var(--vscode-badge-background); border-radius: 3px; color: var(--vscode-badge-foreground); display: block; font-size: 0.85em; margin-top: 6px; padding: 3px 5px; }
-    .sprint-card { margin-top: 12px; }
-    .scope, .empty, li span { color: var(--vscode-descriptionForeground); }
-    .task-card { min-width: 0; margin-top: 8px; padding: 6px; border: 1px solid var(--vscode-focusBorder); border-left-width: 4px; border-radius: 4px; background: var(--vscode-editor-inactiveSelectionBackground); overflow-wrap: anywhere; }
-    .task-bar { margin-top: 0; }
-    .task-title { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-    .task-code { font-weight: 700; }
-    .task-status, .task-range, .continuation { display: block; font-size: 0.85em; margin-top: 3px; }
-    .continuation { font-style: italic; }
-    .warnings { border: 1px solid var(--vscode-editorWarning-foreground); padding: 12px; }
-    ${Array.from({ length: 7 }, (_, index) => `.col-${index + 1} { grid-column-start: ${index + 1}; } .span-${index + 1} { grid-column-end: span ${index + 1}; }`).join('\n    ')}
+    * { box-sizing: border-box; }
+    body {
+      --calendar-foreground: var(--vscode-editor-foreground, #24292f);
+      --calendar-background: var(--vscode-editor-background, #ffffff);
+      --calendar-muted: var(--vscode-descriptionForeground, #57606a);
+      --calendar-border: var(--vscode-contrastBorder, var(--vscode-panel-border, #d0d7de));
+      --calendar-fill: var(--vscode-editor-inactiveSelectionBackground, #eaeef2);
+      --calendar-focus: var(--vscode-focusBorder, #0969da);
+      --calendar-link: var(--vscode-textLink-foreground, #0969da);
+      color: var(--calendar-foreground); background: var(--calendar-background); font-family: var(--vscode-font-family, sans-serif); font-size: var(--vscode-font-size, 13px); margin: 0; padding: 16px;
+    }
+    main { max-width: 1600px; margin: auto; min-width: 0; }
+    h1 { font-size: 1.5em; font-weight: 600; margin: 0; }
+    h2, h3 { font-size: 1em; }
+    .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+    nav { display: flex; gap: 6px; }
+    button { font: inherit; color: var(--vscode-button-secondaryForeground, var(--calendar-foreground)); background: var(--vscode-button-secondaryBackground, var(--calendar-fill)); border: 1px solid var(--vscode-contrastBorder, transparent); border-radius: 3px; padding: 4px 9px; cursor: pointer; }
+    button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #d8dee4)); }
+    :focus-visible { outline: 2px solid var(--calendar-focus); outline-offset: 2px; }
+    .calendar-scroll { max-width: 100%; overflow-x: auto; border: 1px solid var(--calendar-border); border-radius: 4px; }
+    .calendar-grid { min-width: 700px; }
+    .weekdays, .date-row, .lane, .day-columns { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+    .weekdays { padding: 8px 0; text-align: center; font-size: .85em; color: var(--calendar-muted); }
+    .calendar-week { position: relative; min-height: 104px; border-top: 1px solid var(--calendar-border); }
+    .day-columns { position: absolute; inset: 0; pointer-events: none; }
+    .day-columns > div + div { border-left: 1px solid var(--calendar-border); }
+    .weekend { background: var(--calendar-fill); opacity: .25; }
+    .date-row, .sprint-lanes, .task-lanes, .week-controls { position: relative; }
+    .day { min-width: 0; height: 28px; padding: 3px 6px; font-size: .85em; }
+    time { display: inline-flex; min-width: 22px; height: 22px; align-items: center; justify-content: center; border-radius: 50%; }
+    .adjacent { color: var(--calendar-muted); }
+    .today time { background: var(--vscode-button-background, #0969da); color: var(--vscode-button-foreground, #ffffff); font-weight: 700; outline: 1px solid var(--calendar-focus); }
+    .lane { gap: 0; align-items: center; }
+    .sprint-lane { height: 20px; }
+    .task-lane { height: 27px; }
+    .task-lanes { padding-top: 3px; }
+    .segment { display: flex; align-items: center; gap: 4px; min-width: 0; height: 23px; margin: 0 3px; padding: 2px 5px; border: 1px solid var(--calendar-border); border-radius: 3px; cursor: default; }
+    .sprint-bar { height: 17px; border-radius: 2px; border-left-width: 2px; color: var(--calendar-muted); background: var(--calendar-background); font-size: .78em; }
+    .task-bar { background: var(--calendar-fill); border-left: 3px solid var(--calendar-link); font-size: .85em; }
+    .bar-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+    .task-status { font-size: .85em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; color: var(--calendar-muted); }
+    .continuation { flex: none; }
+    .week-controls { min-height: 28px; padding: 2px 5px; }
+    .week-controls button { padding: 2px 6px; font-size: .8em; background: transparent; color: var(--calendar-link); }
+    .detail-box { margin: 12px 0; border: 1px solid var(--calendar-border); padding: 9px 12px; min-height: 52px; overflow-wrap: anywhere; }
+    .detail-box p { margin: 3px 0 0; }
+    #item-popover { position: fixed; z-index: 5; left: 16px; right: 16px; bottom: 12px; margin: auto; max-width: 850px; padding: 10px 12px; border: 1px solid var(--calendar-focus); background: var(--vscode-editorHoverWidget-background, var(--calendar-background)); color: var(--vscode-editorHoverWidget-foreground, var(--calendar-foreground)); box-shadow: 0 2px 8px var(--vscode-widget-shadow, #0003); overflow-wrap: anywhere; pointer-events: none; }
+    details { margin-top: 12px; }
+    summary { cursor: pointer; padding: 5px 0; }
+    .muted, .sprint-card li span { color: var(--calendar-muted); }
+    .sprint-card { border-top: 1px solid var(--calendar-border); padding: 4px 0; overflow-wrap: anywhere; }
+    .sprint-card li { margin: 6px 0; }
+    .sprint-card li span { display: block; font-size: .9em; }
+    .warnings { border: 1px solid var(--vscode-editorWarning-foreground, #9a6700); padding: 8px 12px; margin: 12px 0; overflow-wrap: anywhere; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
+    @media (max-width: 600px) { body { padding: 10px; } h1 { font-size: 1.25em; } .toolbar { gap: 8px; } }
+    @media (forced-colors: active) { .segment, button, .calendar-scroll, .today time { border: 1px solid CanvasText; } }
+    ${Array.from({ length: 7 }, (_, index) => `.col-${index + 1} { grid-column-start: ${index + 1}; } .span-${index + 1} { grid-column-end: span ${index + 1}; }`).join('\n')}
   </style>
 </head>
-<body>
-  <h1>Sprint Calendar</h1>
-  <p>Tasks with explicit planned dates appear as day cards or multi-day bars. End dates are inclusive; undated tasks stay off the calendar.</p>
-  ${calendar.warnings.length ? `<section class="warnings" role="alert"><h2>Tasks not plotted</h2><ul>${calendar.warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join('')}</ul></section>` : ''}
-  ${renderCalendarGrid(calendar)}
-  <section>
-    <h2>Sprint Tasks</h2>
-    ${sprintCards}
+<body data-focus="${escapeHtml(state.focusId ?? '')}" data-month="${state.month}">
+<main>
+  <header class="toolbar"><h1 id="month-heading">${monthLabel}</h1>
+    <nav aria-label="Calendar month">
+      <button id="nav-previous" data-action="previous" aria-label="Previous month">‹ Previous</button>
+      <button id="nav-today" data-action="today">Today</button>
+      <button id="nav-next" data-action="next" aria-label="Next month">Next ›</button>
+    </nav>
+  </header>
+  <p id="month-announcement" class="sr-only" role="status" aria-live="polite"></p>
+  <div class="calendar-scroll" id="calendar-scroll" role="region" aria-labelledby="month-heading" aria-label="Month calendar, horizontally scrollable" tabindex="0">
+    <div class="calendar-grid">
+      <div class="weekdays">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => `<strong>${day}</strong>`).join('')}</div>
+      ${layout.weeks.map(week => renderWeek(week, state, sprintLanes, taskLanes)).join('')}
+    </div>
+  </div>
+  <section class="detail-box" aria-label="Item details"><strong>Item details</strong>
+    <p id="item-details" class="muted">Focus or hover a task or sprint to read its full details.</p>
   </section>
+  <div id="item-popover" hidden aria-hidden="true"></div>
+  ${calendar.warnings.length ? `<section class="warnings" role="alert"><h2>Tasks not plotted</h2><ul>${calendar.warnings.map(warning => `<li>${escapeHtml(warning)}</li>`).join('')}</ul></section>` : ''}
+  ${!layout.weeks.some(week => week.tasks.length || week.sprints.length) ? '<p class="muted">No scheduled sprints or tasks in this month view.</p>' : ''}
+  <details id="calendar-help"><summary>Scheduling help</summary>
+    <p>Read-only calendar. Tasks use explicit startDate and endDate; end dates are inclusive, including weekends.
+      Sprint membership does not schedule tasks: tasks without planned dates are not shown on the calendar.
+      Scheduled tasks outside sprint ranges or without a sprint still appear. Use the week controls to reveal hidden items.</p>
+  </details>
+  <details id="sprint-membership"><summary>Sprint membership · ${calendar.sprints.length} sprints</summary>
+    <p class="muted">Membership only, not the task schedule. Undated or invalid-date members remain listed here.</p>
+    ${calendar.sprints.length ? calendar.sprints.map(sprint => renderSprintCard(sprint, calendar)).join('') : '<p class="muted">No sprints with valid date ranges are available.</p>'}
+  </details>
+</main>
+<script nonce="${nonce}">
+(() => {
+  const vscode = acquireVsCodeApi();
+  const saved = vscode.getState() || {};
+  const scroll = document.getElementById('calendar-scroll');
+  const popover = document.getElementById('item-popover');
+  const details = document.getElementById('item-details');
+  let locked = false;
+  function remember() {
+    vscode.setState({ month: document.body.dataset.month, focus: document.activeElement?.id,
+      x: scroll.scrollLeft, y: window.scrollY,
+      help: document.getElementById('calendar-help').open,
+      membership: document.getElementById('sprint-membership').open });
+  }
+  function show(element) {
+    if (!element?.dataset.detail) { return; }
+    details.textContent = element.dataset.detail;
+    popover.textContent = element.dataset.detail;
+    popover.hidden = false;
+  }
+  document.addEventListener('click', event => {
+    const button = event.target.closest('button[data-action]');
+    if (!button || locked) { return; }
+    remember();
+    locked = true;
+    const message = { action: button.dataset.action };
+    if (message.action === 'toggle') { message.week = button.dataset.week; }
+    vscode.postMessage(message);
+  });
+  document.addEventListener('focusin', event => { show(event.target); remember(); });
+  document.addEventListener('focusout', () => { popover.hidden = true; });
+  document.querySelectorAll('.segment').forEach(element => {
+    element.addEventListener('mouseenter', () => show(element));
+    element.addEventListener('mouseleave', () => {
+      popover.hidden = true;
+      if (document.activeElement?.matches('.segment')) { show(document.activeElement); }
+    });
+  });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') { popover.hidden = true; } });
+  document.querySelectorAll('details').forEach(element => element.addEventListener('toggle', remember));
+  scroll.addEventListener('scroll', remember, { passive: true });
+  window.addEventListener('scroll', remember, { passive: true });
+  document.getElementById('calendar-help').open = Boolean(saved.help);
+  document.getElementById('sprint-membership').open = Boolean(saved.membership);
+  requestAnimationFrame(() => {
+    const sameMonth = saved.month === document.body.dataset.month;
+    const focus = document.getElementById(document.body.dataset.focus || (sameMonth ? saved.focus : '') || '');
+    focus?.focus({ preventScroll: true });
+    scroll.scrollLeft = Number(saved.x) || 0;
+    window.scrollTo(0, sameMonth ? Number(saved.y) || 0 : 0);
+    document.getElementById('month-announcement').textContent = document.getElementById('month-heading').textContent;
+  });
+})();
+</script>
 </body>
 </html>`;
 }

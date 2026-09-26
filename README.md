@@ -10,7 +10,7 @@ A productivity extension for managing tasks, epics, backlogs, and sprints direct
 - **Epics & Backlogs:** Group tasks under epics and backlogs for better planning and tracking.
 - **Quick Add Command:** Use the "Add Quickly" command to create tasks, epics, and backlog entries with a single input.
 - **Sprint Planning:** Move tasks from backlogs to sprints for active development.
-- **Task Calendar:** See explicitly scheduled tasks as single-day cards or multi-day bars alongside sprint dates.
+- **Task Calendar:** Browse a month view with aligned task bars, subtle sprint ribbons, and expandable busy weeks.
 - **VSCode Integration:** Access all features from the sidebar and command palette.
 - **Markdown Linking:** Tasks, epics, and backlogs are interlinked using Markdown for easy navigation.
 
@@ -43,6 +43,27 @@ Run **SprintDesk: Show Sprint Calendar** from the Command Palette or a sprint's
 context menu. The view includes sprint dates and explicitly scheduled tasks,
 including tasks that are not assigned to a sprint.
 
+### Browse the calendar
+
+- The calendar opens on the current month. Use **Previous**, **Next**, and
+  **Today** to navigate; the selected month is retained while the panel is open.
+- Each month has six Monday-first weeks. Adjacent-month dates are subdued,
+  weekends have a subtle background, and today's date is highlighted.
+- Sprint ribbons provide context above the task lanes, with one label per
+  weekly segment instead of a repeated label in every day.
+- Single-day and multi-day tasks share the same aligned lanes. A multi-day
+  bar spans its dates and continues in the following week when necessary.
+- Busy weeks initially show up to two sprint lanes and three task lanes.
+  Use the **more** controls to reveal the remaining items, then collapse
+  the week again. Navigation to another month resets expanded weeks.
+- Focus or hover over a task or sprint to read its full details. Navigation
+  and expansion controls are keyboard accessible.
+- On narrow panels, scroll the calendar horizontally to preserve readable
+  date columns. Expand the secondary sprint membership section to inspect
+  assigned tasks, including those without scheduled dates.
+
+### Schedule tasks
+
 To schedule a task, add both fields to its existing entry in
 `.SprintDesk/data/tasks.yml` (the task source of truth):
 
@@ -55,10 +76,6 @@ Use quoted `YYYY-MM-DD` strings; `DD-MM-YYYY` strings are also accepted.
 Set both fields to the same date for a single-day task. Save the data file and
 reopen the calendar to see the changes.
 
-- **Single-day tasks** appear inside their day with task code, shortened title,
-  and status. Hover over the title to read it in full.
-- **Multi-day tasks** appear as bars spanning their planned dates, wrapping at
-  Monday-to-Sunday week boundaries with continuation labels.
 - End dates are inclusive and ranges include weekends. Dates are treated as
   calendar dates, without timezone conversion.
 - Undated tasks stay off the grid; sprint membership, creation timestamps, and
@@ -67,8 +84,9 @@ reopen the calendar to see the changes.
   plotted. Task ranges are not clipped to their sprint's dates.
 
 This is a read-only view; date pickers, drag-to-schedule, and automatic refresh
-are not included. Editing a task's Markdown description does not update its
-schedule in the YAML data.
+are not included. Navigation and expansion do not change task data. Reopen the
+calendar after changing the data file to load the updated schedule. Editing a
+task's Markdown description does not update its schedule in the YAML data.
 
 Calendar development checks:
 
