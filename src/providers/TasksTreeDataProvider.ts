@@ -1,13 +1,12 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import * as fs from 'fs';
-import { PROJECT_CONSTANTS, UI_CONSTANTS } from '../utils/constant';
-import matter from 'gray-matter';
 import * as taskService from '../services/taskService';
 import * as fileService from '../services/fileService';
-import { SprintDeskItem } from '../utils/SprintDeskItem';
 import { getDataService } from '../data/DataService';
-import { Task } from '../data/types';
+import { Task, TaskStatus } from '../data/types';
+import { TaskStatusGroup, groupTasksByStatus } from './taskStatusGroups';
+
+const TASK_PAGE_SIZE = 100;
 interface TaskData {
   _id: string;
   name: string;
@@ -139,9 +138,46 @@ export class TaskTreeItem extends vscode.TreeItem {
   }
 }
 
-export class TasksTreeDataProvider implements vscode.TreeDataProvider<TaskTreeItem>, vscode.TreeDragAndDropController<TaskTreeItem> {
-  private _onDidChangeTreeData: vscode.EventEmitter<TaskTreeItem | undefined | void> = new vscode.EventEmitter<TaskTreeItem | undefined | void>();
-  readonly onDidChangeTreeData: vscode.Event<TaskTreeItem | undefined | void> = this._onDidChangeTreeData.event;
+export class TaskStatusTreeItem extends vscode.TreeItem {
+  constructor(public readonly group: TaskStatusGroup) {
+    super(
+      group.label,
+      group.defaultExpanded
+        ? vscode.TreeItemCollapsibleState.Expanded
+        : vscode.TreeItemCollapsibleState.Collapsed
+    );
+    this.id = `task-status-${group.status}`;
+    this.contextValue = 'taskStatusGroup';
+    this.description = `${group.tasks.length} tasks`;
+    this.iconPath = new vscode.ThemeIcon('folder');
+    this.tooltip = `${group.label}: ${group.tasks.length} tasks`;
+  }
+}
+
+export class LoadMoreTasksTreeItem extends vscode.TreeItem {
+  constructor(
+    public readonly status: TaskStatus,
+    remainingCount: number,
+  ) {
+    super(`Load ${Math.min(TASK_PAGE_SIZE, remainingCount)} more tasks`, vscode.TreeItemCollapsibleState.None);
+    this.id = `task-status-${status}-load-more`;
+    this.contextValue = 'taskLoadMore';
+    this.description = `${remainingCount} remaining`;
+    this.iconPath = new vscode.ThemeIcon('add');
+    this.command = {
+      command: 'sprintdesk.loadMoreTasks',
+      title: 'Load More Tasks',
+      arguments: [status],
+    };
+  }
+}
+
+type TaskTreeElement = TaskTreeItem | TaskStatusTreeItem | LoadMoreTasksTreeItem;
+
+export class TasksTreeDataProvider implements vscode.TreeDataProvider<TaskTreeElement>, vscode.TreeDragAndDropController<TaskTreeElement> {
+  private _onDidChangeTreeData: vscode.EventEmitter<TaskTreeElement | undefined | void> = new vscode.EventEmitter<TaskTreeElement | undefined | void>();
+  readonly onDidChangeTreeData: vscode.Event<TaskTreeElement | undefined | void> = this._onDidChangeTreeData.event;
+  private visibleTaskCounts = new Map<TaskStatus, number>();
 
   // Drag and Drop implementation
   public readonly dropMimeTypes: string[] = [];
@@ -155,6 +191,7 @@ export class TasksTreeDataProvider implements vscode.TreeDataProvider<TaskTreeIt
    */
   public setWorkspaceRoot(root?: string) {
     this.workspaceRoot = root;
+    this.visibleTaskCounts.clear();
     this.refresh();
   }
 
@@ -162,10 +199,10 @@ export class TasksTreeDataProvider implements vscode.TreeDataProvider<TaskTreeIt
   // and returned to the main tasks list.
   public handleDrop(): void { }
 
-  public handleDrag(source: readonly TaskTreeItem[], dataTransfer: vscode.DataTransfer): void {
-    if (!source[0]) return;
+  public handleDrag(source: readonly TaskTreeElement[], dataTransfer: vscode.DataTransfer): void {
+    const taskItem = source.find(item => item instanceof TaskTreeItem);
+    if (!taskItem) return;
 
-    const taskItem = source[0];
     const taskData = taskItem.taskData;
 
     const transferData = {
@@ -193,43 +230,57 @@ export class TasksTreeDataProvider implements vscode.TreeDataProvider<TaskTreeIt
     this._onDidChangeTreeData.fire(undefined);
   }
 
-  getTreeItem(element: TaskTreeItem): vscode.TreeItem {
+  public loadMoreTasks(status: TaskStatus): void {
+    const currentCount = this.visibleTaskCounts.get(status) ?? TASK_PAGE_SIZE;
+    this.visibleTaskCounts.set(status, currentCount + TASK_PAGE_SIZE);
+    this.refresh();
+  }
+
+  getTreeItem(element: TaskTreeElement): vscode.TreeItem {
     return element;
   }
 
-  async getChildren(element?: TaskTreeItem): Promise<TaskTreeItem[]> {
+  async getChildren(element?: TaskTreeElement): Promise<TaskTreeElement[]> {
     const ws = this.workspaceRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!ws) {
       return [];
     }
 
     if (!element) {
-      // Load tasks directly from YAML (source of truth)
-      const tasks = taskService.loadTasks();
+      const tasks = taskService.getTaskService(ws).loadTasks();
+      return groupTasksByStatus(tasks).map(group => new TaskStatusTreeItem(group));
+    }
 
-      return tasks.map((task: Task) => {
-        // Get the MD file path from the task's path field
-        const mdPath = task.path || '';
+    if (element instanceof TaskStatusTreeItem) {
+      const visibleCount = this.visibleTaskCounts.get(element.group.status) ?? TASK_PAGE_SIZE;
+      const visibleTasks = element.group.tasks.slice(0, visibleCount);
+      const taskItems: TaskTreeElement[] = visibleTasks.map(task => this.createTaskTreeItem(task));
+      const remainingCount = element.group.tasks.length - visibleTasks.length;
 
-        const taskData: TaskData = {
-          _id: task.id,
-          name: task.name || '',
-          title: task.title,
-          type: task.type,
-          status: task.status,
-          priority: task.priority,
-          epic: task.epic ? { _id: task.epic, title: task.epic, path: '' } : null,
-          path: mdPath
-        };
+      if (remainingCount > 0) {
+        taskItems.push(new LoadMoreTasksTreeItem(element.group.status, remainingCount));
+      }
 
-        // Create TreeItem with task data and MD file path
-        const item = new TaskTreeItem(taskData, task, mdPath);
-
-        return item;
-      }).filter(item => item !== null) as TaskTreeItem[];
+      return taskItems;
     }
 
     return [];
   }
 
+  private createTaskTreeItem(task: Task): TaskTreeItem {
+    const taskData: TaskData = {
+      _id: task.id,
+      name: task.name || '',
+      title: task.title,
+      type: task.type,
+      status: task.status,
+      priority: task.priority,
+      epic: task.epic ? { _id: task.epic, title: task.epic, path: '' } : null,
+      path: task.path || '',
+    };
+
+    const item = new TaskTreeItem(taskData, task, task.path);
+    item.id = `task-${task.id}`;
+    return item;
+  }
 }

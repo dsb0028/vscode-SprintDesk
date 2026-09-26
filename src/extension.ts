@@ -217,6 +217,11 @@ const tasksProvider = new TasksTreeDataProvider();
     dragAndDropController: tasksProvider
   });
   context.subscriptions.push(tasksTreeView);
+  context.subscriptions.push(
+    vscode.commands.registerCommand('sprintdesk.loadMoreTasks', (status) => {
+      tasksProvider.loadMoreTasks(status);
+    })
+  );
 
 const repositoriesTreeView = vscode.window.createTreeView('sprintdesk-repositories', {
     treeDataProvider: repositoriesProvider

@@ -30,6 +30,7 @@
     "package:wv": "webpack --mode production --config ./webpack/webview.config.js",
     "compile-tests": "tsc -p . --outDir out --noEmit false",
     "test:calendar": "npm run compile-tests && node out/calendar/sprintCalendar.test.js",
+    "test:task-statuses": "npm run compile-tests && node out/providers/taskStatusGroups.test.js",
     "test:mcp": "npm run compile-tests && node out/mcp/core.test.js",
     "watch-tests": "tsc -p . -w --outDir out --noEmit false",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",

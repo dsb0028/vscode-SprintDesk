@@ -98,6 +98,31 @@ npm run test:calendar
 
 ---
 
+## Task View status directories
+
+The **Tasks** sidebar groups tasks into collapsible status directories. A task
+appears in exactly one directory based on its `status` field in
+`.SprintDesk/data/tasks.yml`; moving a task through its workflow changes its
+directory automatically.
+
+- **In Progress**, **Under Review**, and **Blocked** are expanded initially.
+- **Waiting**, **Done**, and **Cancelled** are collapsed initially.
+- VS Code retains expanded/collapsed directory state by status.
+- Status directories show their task count, and tasks are sorted by task number.
+- Directories with more than 100 tasks show a **Load more tasks** row. Selecting
+  it reveals the next 100 tasks without changing task data.
+
+The Task View is virtual: status directories do not move task Markdown files or
+introduce parent/subtask relationships.
+
+Task View grouping checks:
+
+```sh
+npm run test:task-statuses
+```
+
+---
+
 ## 🤝 How to Collaborate
 
 1. **Fork the repository** on GitHub and clone your fork locally.
