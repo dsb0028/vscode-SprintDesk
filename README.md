@@ -58,6 +58,8 @@ including tasks that are not assigned to a sprint.
   the week again. Navigation to another month resets expanded weeks.
 - Focus or hover over a task or sprint to read its full details. Navigation
   and expansion controls are keyboard accessible.
+- Click a task bar (or focus it and press **Enter** or **Space**) to open its
+  Markdown task file in the editor.
 - On narrow panels, scroll the calendar horizontally to preserve readable
   date columns. Expand the secondary sprint membership section to inspect
   assigned tasks, including those without scheduled dates.

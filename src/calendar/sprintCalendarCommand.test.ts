@@ -10,14 +10,14 @@ interface Disposable {
 }
 
 class CalendarPanelDouble implements Disposable {
-  messageListener: ((message: unknown) => void) | undefined;
+  messageListener: ((message: unknown) => void | Promise<void>) | undefined;
   disposeListener: (() => void) | undefined;
   messagesDisposed = false;
   disposalListenerDisposed = false;
   disposed = false;
   webview = {
     html: '',
-    onDidReceiveMessage: (listener: (message: unknown) => void): Disposable => {
+    onDidReceiveMessage: (listener: (message: unknown) => void | Promise<void>): Disposable => {
       this.messageListener = listener;
       return { dispose: () => {
         this.messagesDisposed = true;
@@ -39,8 +39,8 @@ class CalendarPanelDouble implements Disposable {
     this.disposeListener?.();
   }
 
-  receive(message: unknown): void {
-    this.messageListener?.(message);
+  receive(message: unknown): void | Promise<void> {
+    return this.messageListener?.(message);
   }
 }
 
@@ -67,6 +67,7 @@ export async function runSprintCalendarCommandTests(): Promise<void> {
   const errors: string[] = [];
   const roots: string[] = [];
   const panels: CalendarPanelDouble[] = [];
+  const openedTasks: string[] = [];
   const workspace: { workspaceFolders: { uri: { fsPath: string } }[]; getWorkspaceFolder: (uri: { fsPath: string }) => { uri: { fsPath: string } } } = {
     workspaceFolders: [],
     getWorkspaceFolder: uri => {
@@ -76,6 +77,10 @@ export async function runSprintCalendarCommandTests(): Promise<void> {
   };
   const host = {
     commands: {
+      executeCommand: async (name: string, filePath: string): Promise<void> => {
+        assert.equal(name, 'sprintdesk.editTaskRaw');
+        openedTasks.push(filePath);
+      },
       registerCommand: (name: string, callback: NonNullable<typeof command>): Disposable => {
         assert.equal(name, 'sprintdesk.showSprintCalendar');
         command = callback;
@@ -105,9 +110,13 @@ export async function runSprintCalendarCommandTests(): Promise<void> {
   const storage = new Proxy({
     loadSprints: () => { sprintReads++; return [fixtureSprint]; },
     loadTasks: () => { taskReads++; return tasks; },
+    getTasksDir: () => '/workspace/.SprintDesk/Tasks',
+    getTaskFilename: (task: Task) => `[${task.code}]_${task.name}.md`,
   }, {
     get(target, property) {
-      assert.ok(property === 'loadTasks' || property === 'loadSprints', `Unexpected storage access: ${String(property)}`);
+      assert.ok(property === 'loadTasks' || property === 'loadSprints'
+        || property === 'getTasksDir' || property === 'getTaskFilename',
+      `Unexpected storage access: ${String(property)}`);
       return target[property];
     },
   });
@@ -174,6 +183,22 @@ export async function runSprintCalendarCommandTests(): Promise<void> {
     assert.match(panel.webview.html, /data-focus="nav-today"/);
     assert.equal(taskReads, 1);
     assert.equal(sprintReads, 1);
+    assert.equal(JSON.stringify(tasks), originalData);
+
+    const beforeOpen = panel.webview.html;
+    await panel.receive({ action: 'openTask', taskId: 'task-1' });
+    assert.deepEqual(openedTasks, ['/workspace/.SprintDesk/Tasks/[SPD-1]_calendar-task.md']);
+    assert.equal(panel.webview.html, beforeOpen);
+    for (const invalid of [
+      { action: 'openTask' }, { action: 'openTask', taskId: 1 },
+      { action: 'openTask', taskId: 'task-1', path: '/untrusted.md' },
+    ]) {
+      await panel.receive(invalid);
+    }
+    await panel.receive({ action: 'openTask', taskId: 'missing-task' });
+    assert.equal(openedTasks.length, 1);
+    assert.equal(errors.at(-1), 'Task not found. Reopen the calendar to refresh it.');
+    assert.equal(panel.webview.html, beforeOpen);
     assert.equal(JSON.stringify(tasks), originalData);
 
     await command({ filePath: '/selected/task.md' });
