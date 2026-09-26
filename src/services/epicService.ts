@@ -1,225 +1,388 @@
 import * as path from 'path';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
-import * as vscode from 'vscode';
-import { promptInput, promptPick } from '../utils/helpers';
 import * as fileService from './fileService';
-import { getPriorityOptions, getTaskTypeOptions } from '../utils/helpers';
-import { PROJECT_CONSTANTS, TASK_CONSTANTS, UI_CONSTANTS } from '../utils/constant';
-import * as taskController from '../controller/taskController';
-import { 
-  generateEpicContent,
-  generateEpicTemplate
-} from '../utils/epicTemplate';
-import { getEpicTasks } from '../controller/epicController';
-import { relativePathTaskToTaskpath } from '../utils/taskUtils';
-import { generateEpicName } from '../utils/epicTemplate';
+import { PROJECT_CONSTANTS } from '../utils/constant';
+import { getDataService } from '../data/DataService';
+import { Epic } from '../data/types';
 
-// [vNext] : next file version v0.0.2
+function getDs() {
+  const ws = fileService.getWorkspaceRoot();
+  return ws ? getDataService(ws) : undefined;
+}
 
 export async function createNewEpic(epicMetadata: SprintDesk.EpicMetadata): Promise<SprintDesk.EpicMetadata> {
   const ws = fileService.getWorkspaceRoot();
-  const title = epicMetadata.title || await promptInput('Epic Title');
+  const title = epicMetadata.title;
   if (!title) throw new Error('Epic title is required');
-  const epicsDir = fileService.getEpicsDir(ws);
-  const totalEpics = fileService.getEpicsBaseNames(epicsDir).length;
-  // get _id 
-  const _id = totalEpics === 0 ? 1 : totalEpics + 1;
-  const epicBaseName = fileService.createEpicBaseName(title, _id);
-  const epicName = epicBaseName+'.md'
-  const epicData: SprintDesk.EpicMetadata = {
-    _id,
-    title,
-    status: epicMetadata.status || 'planned',
-    priority: epicMetadata.priority || 'medium',
+
+  const category = epicMetadata.category || 'MISC';
+
+  const dataService = getDataService(ws);
+  const epicId = crypto.randomUUID();
+  const epicNumber = dataService.generateNextNumber('epic');
+  const epicCode = dataService.generateCode('epic', epicNumber);
+
+  const epic: Epic = {
+    id: epicId,
+    number: epicNumber,
+    code: epicCode,
+    name: '',
+    title: title,
+    category: category,
+    description: epicMetadata.description || '',
+    status: 'planned',
+    priority: 'medium',
+    tasks: [],
     createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  epic.name = `[${epicCode}]_${category}_${dataService.slugifyTitle(title)}`;
+  epic.path = path.join(dataService.getEpicsDir(), dataService.getEpicFilename(epic));
+
+  dataService.addEpic(epic);
+  dataService.saveEpicMd(epic);
+
+  return {
+    _id: epic.id as any,
+    title: epic.title,
+    status: epic.status as SprintDesk.EpicStatus,
+    priority: epic.priority as SprintDesk.Priority,
+    createdAt: epic.createdAt,
+    updatedAt: epic.updatedAt,
     totalTasks: 0,
     completedTasks: 0,
-    path: fileService.createEpicRelativePath(epicBaseName)
-  }
-  // write epic file
-  fs.writeFileSync(path.join(fileService.getEpicsDir(ws), epicName), generateEpicTemplate(epicData), 'utf8');
-  return epicData;
-}
-
-
-
-
-
-
-
-
-
-
-
-
-// [vPrevious]
-export function createEpicFromMetadata(metadata: SprintDesk.EpicMetadata): string {
-  const ws = fileService.getWorkspaceRoot() || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!ws) throw new Error('No workspace');
-
-  const epicsDir = path.join(ws, PROJECT_CONSTANTS.SPRINTDESK_DIR, PROJECT_CONSTANTS.EPICS_DIR);
-  fs.mkdirSync(epicsDir, { recursive: true });
-  
-  const epicName = generateEpicName(metadata.title);
-  const epicPath = path.join(epicsDir, epicName);
-  
-  if (!fs.existsSync(epicPath)) {
-    const content = generateEpicTemplate(metadata);
-    fs.writeFileSync(epicPath, content, 'utf8');
-  }
-  
-  return epicPath;
-}
-interface TreeItemLike {
-  label: string;
-  collapsibleState: vscode.TreeItemCollapsibleState;
-  // absolute path if file exists
-  path?: string;
-  // relative path as listed in backlog frontmatter or link
-  rel?: string;
-  command?: {
-    command: string;
-    title: string;
-    arguments: any[];
+    path: epic.path
   };
 }
-export function listEpics(ws: string): string[] {
-  const epicsDir = path.join(ws, PROJECT_CONSTANTS.SPRINTDESK_DIR, PROJECT_CONSTANTS.EPICS_DIR);
-  if (!fs.existsSync(epicsDir)) {
-    fs.mkdirSync(epicsDir, { recursive: true });
-    return [];
-  }
-  return fileService.listMdFiles(epicsDir).map(f => path.join(epicsDir, f));
+
+export function createEpic(name: string, category?: string): string {
+  const ws = fileService.getWorkspaceRoot();
+  if (!ws) throw new Error('No workspace');
+
+  const dataService = getDataService(ws);
+  const epicId = crypto.randomUUID();
+  const epicNumber = dataService.generateNextNumber('epic');
+  const epicCode = dataService.generateCode('epic', epicNumber);
+  const epicCategory = category || 'MISC';
+
+  const epic: Epic = {
+    id: epicId,
+    number: epicNumber,
+    code: epicCode,
+    name: '',
+    title: name,
+    category: epicCategory,
+    description: '',
+    status: 'planned',
+    priority: 'medium',
+    tasks: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  epic.name = `[${epicCode}]_${epicCategory}_${dataService.slugifyTitle(name)}`;
+  epic.path = path.join(dataService.getEpicsDir(), dataService.getEpicFilename(epic));
+
+  dataService.addEpic(epic);
+  dataService.saveEpicMd(epic);
+
+  return epic.path;
 }
 
-export function createEpic(name: string): string {
-  return createEpicFromMetadata({
-    title: name,
-    status: 'planned',
-    priority: 'medium'
-  });
-}
-export function readEpic(filePath: string): string {
-  return fs.readFileSync(filePath, 'utf8');
-}
-export function updateEpic(filePath: string, content: string) {
-  fs.writeFileSync(filePath, content, 'utf8');
-}
-export function deleteEpic(filePath: string) {
-  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-}
-export function addTaskToEpic(epicTitle: string, taskName: string) {
-  const ws = fileService.getWorkspaceRoot() || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+export function addTaskToEpic(epicTitleOrPath: string, taskNameOrPath: string) {
+  const ws = fileService.getWorkspaceRoot();
   if (!ws) throw new Error('No workspace');
-  const epicsDir = path.join(ws, PROJECT_CONSTANTS.SPRINTDESK_DIR, PROJECT_CONSTANTS.EPICS_DIR);
-  const epicPath = path.join(epicsDir, generateEpicName(epicTitle));
+
+  // Support both title and path
+  let epicTitle = epicTitleOrPath;
+  let taskName = taskNameOrPath;
   
-  // Read epic and task files
-  const epicContent = fileService.readFileSyncSafe(epicPath);
-  if (!epicContent) throw new Error('Epic file not found');
+  if (epicTitleOrPath.includes(path.sep)) {
+    epicTitle = path.basename(epicTitleOrPath, '.md');
+  }
+  if (taskNameOrPath.includes(path.sep)) {
+    taskName = path.basename(taskNameOrPath, '.md');
+  }
+
+  const dataService = getDataService(ws);
+  const epics = dataService.loadEpics();
+  const epic = epics.find(e => e.name === epicTitle || e.id === epicTitle);
+  if (!epic) return;
+
   const taskPath = path.join(ws, PROJECT_CONSTANTS.SPRINTDESK_DIR, PROJECT_CONSTANTS.TASKS_DIR, taskName);
   const taskContent = fileService.readFileSyncSafe(taskPath);
-  if (!taskContent) throw new Error('Task file not found');
+  if (!taskContent) return;
 
-  // Parse both files with gray-matter
-  const matter = require('gray-matter');
-  const epicMatter = matter(epicContent);
-  const taskMatter = matter(taskContent);
+  const tm = require('gray-matter')(taskContent);
+  const taskId = tm.data._id || tm.data.id || path.basename(taskName, PROJECT_CONSTANTS.MD_FILE_EXTENSION);
 
-  // Initialize tasks array if needed
-  if (!Array.isArray(epicMatter.data.tasks)) {
-    epicMatter.data.tasks = [];
+  if (!epic.tasks.includes(taskId)) {
+    epic.tasks.push(taskId);
   }
 
-  // Create task data object
-  const taskData = {
-    _id: taskMatter.data._id,
-    title: taskMatter.data.title,
-    status: taskMatter.data.status || TASK_CONSTANTS.STATUS.WAITING,
-    priority: taskMatter.data.priority || TASK_CONSTANTS.PRIORITY.MEDIUM,
-    path: `../${PROJECT_CONSTANTS.TASKS_DIR}/${taskName}`
-  };
+  dataService.updateEpic(epic.id, { tasks: epic.tasks, updatedAt: new Date().toISOString() });
+  dataService.saveEpicMd(epic);
 
-  // Add task to the tasks array if not already present
-  const existingTaskIndex = epicMatter.data.tasks.findIndex((t: any) => t._id === taskData._id);
-  if (existingTaskIndex >= 0) {
-    epicMatter.data.tasks[existingTaskIndex] = taskData;
-  } else {
-    epicMatter.data.tasks.push(taskData);
+  const allTasks = dataService.loadTasks();
+  const taskObj = allTasks.find(t => t.id === taskId);
+  if (taskObj) {
+    taskObj.epic = epic.name;
+    dataService.updateTask(taskObj.id, { epic: epic.name });
+    dataService.saveTaskMd(taskObj);
+  }
+}
+
+export function addTaskToEpicById(epicId: string, taskId: string) {
+  const ws = fileService.getWorkspaceRoot();
+  if (!ws) return;
+  
+  const dataService = getDataService(ws);
+  const epics = dataService.loadEpics();
+  const epic = epics.find(e => e.id === epicId || e.name === epicId);
+  if (!epic) return;
+
+  if (!epic.tasks) {
+    epic.tasks = [];
+  }
+  
+  if (!epic.tasks.includes(taskId)) {
+    epic.tasks.push(taskId);
   }
 
-  // Update task counts
-  epicMatter.data.totalTasks = epicMatter.data.tasks.length;
-  epicMatter.data.completedTasks = epicMatter.data.tasks.filter((t: any) => t.status === 'done' || t.status === 'completed').length;
-  epicMatter.data.progress = Math.round((epicMatter.data.completedTasks / epicMatter.data.totalTasks) * 100) + '%';
+  dataService.updateEpic(epic.id, { tasks: epic.tasks, updatedAt: new Date().toISOString() });
+  dataService.saveEpicMd(epic);
 
-  // Create task table
-  function getStatusEmoji(status: string): string {
-    switch (status?.toLowerCase()) {
-      case TASK_CONSTANTS.STATUS.WAITING: return UI_CONSTANTS.EMOJI.STATUS.WAITING;
-      case TASK_CONSTANTS.STATUS.STARTED: return UI_CONSTANTS.EMOJI.STATUS.IN_PROGRESS;
-      case TASK_CONSTANTS.STATUS.DONE:
-      case TASK_CONSTANTS.STATUS.COMPLETED: return UI_CONSTANTS.EMOJI.STATUS.DONE;
-      case TASK_CONSTANTS.STATUS.BLOCKED: return UI_CONSTANTS.EMOJI.STATUS.BLOCKED;
-      default: return UI_CONSTANTS.EMOJI.STATUS.WAITING;
-    }
-  }
-
-  function getPriorityEmoji(priority: string): string {
-    switch (priority?.toLowerCase()) {
-      case TASK_CONSTANTS.PRIORITY.HIGH: return UI_CONSTANTS.EMOJI.PRIORITY.HIGH;
-      case TASK_CONSTANTS.PRIORITY.LOW: return UI_CONSTANTS.EMOJI.PRIORITY.LOW;
-      default: return UI_CONSTANTS.EMOJI.PRIORITY.MEDIUM;
-    }
-  }
-
-  const taskTable = epicMatter.data.tasks
-    .map((task: any, index: number) => {
-      const statusEmoji = getStatusEmoji(task.status);
-      const priorityEmoji = getPriorityEmoji(task.priority);
-      return `| ${index + 1} | [${task.title}](${task.path}) | ${statusEmoji} ${task.status} | ${priorityEmoji} ${task.priority} | \`${task._id}\` |`;
-    })
-    .join('\n');
-
-  // Replace tasks table in the content
-  const tasksSectionStart = epicMatter.content.indexOf(UI_CONSTANTS.SECTIONS.TASKS_MARKER);
-  if (tasksSectionStart !== -1) {
-    const nextSectionMatch = epicMatter.content.slice(tasksSectionStart).match(/\n##\s/);
-    const tasksSectionEnd = nextSectionMatch
-      ? tasksSectionStart + nextSectionMatch.index
-      : epicMatter.content.length;
+  const taskObj = dataService.loadTasks().find(t => t.id === taskId);
+  if (taskObj) {
+    const oldEpicId = taskObj.epic;
+    const oldEpic = oldEpicId ? epics.find(e => e.name === oldEpicId || e.id === oldEpicId) : undefined;
     
-    epicMatter.content = 
-      epicMatter.content.slice(0, tasksSectionStart) +
-      `${UI_CONSTANTS.SECTIONS.TASKS_MARKER}\n\n| # | Task | Status | Priority | ID |\n|:--|:-----|:------:|:--------:|:-----|\n${taskTable}\n${UI_CONSTANTS.SECTIONS.AUTO_COMMENT}\n\n` +
-      epicMatter.content.slice(tasksSectionEnd);
-  }
-
-  // Write the updated epic file
-  fs.writeFileSync(epicPath, matter.stringify(epicMatter.content, epicMatter.data));
-}
-export async function createEpicInteractive() {
-  const epicName = await (vscode.window.showInputBox as any)({ prompt: 'Epic title' });
-  if (!epicName) return;
-  createEpic(epicName);
-  vscode.window.showInformationMessage('Epic created.');
-}
-export function getTasksFromEpic(epicName: string): TreeItemLike[] {
-  try {
-    const tasks = getEpicTasks(epicName);
-
-    return tasks.map((t: any) => {
-      const label = path.basename(t.path || '');
-      const absPath = t.path;
-      return { 
-        label, 
-        absPath, 
-        collapsibleState: vscode.TreeItemCollapsibleState.None, 
-        path: relativePathTaskToTaskpath(t.path) 
-      };
+    const newCode = updateTaskCodeForNewEpic(oldEpic, epic, taskObj, dataService, taskId);
+    if (newCode !== taskObj.code) {
+      renameTaskFile(taskObj, newCode, dataService);
+      taskObj.code = newCode;
+      taskObj.number = parseInt(newCode.split('.')[1]) || taskObj.number;
+    }
+    
+    taskObj.epic = epic.name;
+    dataService.updateTask(taskId, { 
+      epic: epic.name,
+      code: taskObj.code,
+      number: taskObj.number,
+      name: taskObj.name,
+      path: taskObj.path
     });
-  } catch (e) {
-     throw new Error('No tasks found.');
+    dataService.saveTaskMd(taskObj);
   }
+}
+
+export function addTaskToEpicByName(epicName: string, taskId: string) {
+  const ws = fileService.getWorkspaceRoot();
+  if (!ws) return;
+  
+  const dataService = getDataService(ws);
+  const epics = dataService.loadEpics();
+  const epic = epics.find(e => e.name === epicName);
+  if (!epic) return;
+
+  if (!epic.tasks.includes(taskId)) {
+    epic.tasks.push(taskId);
+  }
+
+  dataService.updateEpic(epic.id, { tasks: epic.tasks, updatedAt: new Date().toISOString() });
+  dataService.saveEpicMd(epic);
+
+  const taskObj = dataService.loadTasks().find(t => t.id === taskId);
+  if (taskObj) {
+    taskObj.epic = epic.name;
+    dataService.updateTask(taskId, { epic: epic.name });
+    dataService.saveTaskMd(taskObj);
+  }
+}
+
+export function removeTaskFromEpic(epicTitleOrPath: string, taskPath: string) {
+  const ws = fileService.getWorkspaceRoot();
+  if (!ws) return;
+  
+  let epicTitle = epicTitleOrPath;
+  if (epicTitleOrPath.includes(path.sep)) {
+    epicTitle = path.basename(epicTitleOrPath, '.md');
+  }
+  const taskName = path.basename(taskPath, '.md');
+
+  const dataService = getDataService(ws);
+  const epics = dataService.loadEpics();
+  const epic = epics.find(e => e.name === epicTitle || e.id === epicTitle);
+  if (!epic) return;
+
+  epic.tasks = epic.tasks.filter(t => t !== taskName);
+  dataService.updateEpic(epic.id, { tasks: epic.tasks, updatedAt: new Date().toISOString() });
+  dataService.saveEpicMd(epic);
+
+  const task = dataService.getTask(taskName);
+  if (task) {
+    task.epic = '';
+    dataService.updateTask(task.id, { epic: '' });
+    dataService.saveTaskMd(task);
+  }
+}
+
+export function removeTaskFromEpicById(epicId: string, taskId: string) {
+  const ws = fileService.getWorkspaceRoot();
+  if (!ws) return;
+  
+  const dataService = getDataService(ws);
+  const epics = dataService.loadEpics();
+  const epic = epics.find(e => e.id === epicId || e.name === epicId);
+  if (!epic || !epic.tasks) return;
+
+  epic.tasks = epic.tasks.filter(t => t !== taskId);
+  dataService.updateEpic(epic.id, { tasks: epic.tasks, updatedAt: new Date().toISOString() });
+  dataService.saveEpicMd(epic);
+
+  const task = dataService.getTask(taskId);
+  if (task) {
+    task.epic = '';
+    dataService.updateTask(task.id, { epic: '' });
+    dataService.saveTaskMd(task);
+  }
+}
+
+export function removeTaskFromEpicByName(epicName: string, taskId: string) {
+  const ws = fileService.getWorkspaceRoot();
+  if (!ws) return;
+  
+  const dataService = getDataService(ws);
+  const epics = dataService.loadEpics();
+  const epic = epics.find(e => e.name === epicName);
+  if (!epic) return;
+
+  epic.tasks = epic.tasks.filter(t => t !== taskId);
+  dataService.updateEpic(epic.id, { tasks: epic.tasks, updatedAt: new Date().toISOString() });
+  dataService.saveEpicMd(epic);
+
+  const task = dataService.getTask(taskId);
+  if (task) {
+    task.epic = '';
+    dataService.updateTask(task.id, { epic: '' });
+    dataService.saveTaskMd(task);
+  }
+}
+
+function updateTaskCodeForNewEpic(oldEpic: Epic | undefined, newEpic: Epic, task: any, dataService: any, currentTaskId: string): string {
+  const config = dataService.loadConfig();
+  
+  let newNumber: number;
+  if (oldEpic && oldEpic.id === newEpic.id) {
+    newNumber = task.number;
+  } else {
+    const existingTasks = (newEpic.tasks || []).filter((tid: string) => tid !== currentTaskId);
+    let maxNum = 0;
+    for (const tid of existingTasks) {
+      const t = dataService.getTask(tid);
+      if (t && t.number && t.number > maxNum) maxNum = t.number;
+    }
+    newNumber = maxNum > 0 ? maxNum + 1 : config.ids.task.startNumber;
+  }
+  
+  const newCode = `${newEpic.code}.${newNumber}`;
+  return newCode;
+}
+
+function renameTaskFile(task: any, newCode: string, dataService: any): void {
+  const ws = fileService.getWorkspaceRoot();
+  const tasksDir = fileService.getTasksDir(ws);
+  const oldPath = task.path;
+  
+  const titleSlug = dataService.slugifyTitle(task.title || 'untitled');
+  const newFilename = `[${newCode}]_${titleSlug}.md`;
+  const newPath = path.join(tasksDir, newFilename);
+  
+  if (oldPath && fs.existsSync(oldPath)) {
+    fs.renameSync(oldPath, newPath);
+    task.path = newPath;
+    task.name = newFilename;
+  }
+}
+
+export function getEpics(ws: string): Epic[] {
+  const dataService = getDataService(ws);
+  return dataService.loadEpics();
+}
+
+export function getEpic(epicId: string): Epic | undefined {
+  const ws = fileService.getWorkspaceRoot();
+  const dataService = getDataService(ws);
+  return dataService.getEpic(epicId);
+}
+
+export function updateEpic(epicId: string, updates: Partial<Epic>): void {
+  const ws = fileService.getWorkspaceRoot();
+  const dataService = getDataService(ws);
+  dataService.updateEpic(epicId, updates);
+  const updated = dataService.getEpic(epicId);
+  if (updated) dataService.saveEpicMd(updated);
+}
+
+export function deleteEpic(epicId: string): void {
+  const ws = fileService.getWorkspaceRoot();
+  const dataService = getDataService(ws);
+  dataService.deleteEpic(epicId);
+}
+
+export function listEpics(ws: string): string[] {
+  const dataService = getDataService(ws);
+  const epics = dataService.loadEpics();
+  const epicsDir = fileService.getEpicsDir(ws);
+  
+  return epics.map(epic => {
+    const filename = dataService.getEpicFilename(epic);
+    return require('path').join(epicsDir, filename);
+  });
+}
+
+export function readEpic(filePath: string): string {
+  const dataService = getDataService(fileService.getWorkspaceRoot());
+  return fs.readFileSync(filePath, 'utf8');
+}
+
+export function getTasksFromEpic(epicName: string): { label: string; path: string; id: string }[] {
+  const ws = fileService.getWorkspaceRoot();
+  const dataService = getDataService(ws);
+  const epic = dataService.loadEpics().find(e => e.name === epicName || e.id === epicName);
+  if (!epic) return [];
+  
+  const tasks = dataService.loadTasks();
+  const config = dataService.loadConfig();
+  const tasksDir = dataService.getTasksDir();
+  
+  return tasks.filter(t => epic.tasks.includes(t.id)).map(t => {
+    const filename = dataService.getTaskFilename(t);
+    return {
+      label: t.title,
+      path: require('path').join(tasksDir, filename),
+      id: t.id
+    };
+  });
+}
+
+export function getTasksFromEpicById(epicId: string): { label: string; path: string; id: string }[] {
+  const ws = fileService.getWorkspaceRoot();
+  const dataService = getDataService(ws);
+  const epic = dataService.loadEpics().find(e => e.id === epicId);
+  if (!epic) return [];
+  
+  const tasks = dataService.loadTasks();
+  const tasksDir = dataService.getTasksDir();
+  
+  return tasks.filter(t => epic.tasks.includes(t.id)).map(t => {
+    const filename = dataService.getTaskFilename(t);
+    return {
+      label: t.title,
+      path: require('path').join(tasksDir, filename),
+      id: t.id
+    };
+  });
 }

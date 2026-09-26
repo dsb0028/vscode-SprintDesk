@@ -71,6 +71,7 @@ export const PRIORITY_EMOJI = {
  */
 export const PROJECT_CONSTANTS = {
     SPRINTDESK_DIR: ".SprintDesk",
+    DATA_DIR: "data",
     BACKLOGS_DIR: "Backlogs",
     EPICS_DIR: "Epics",
     SPRINTS_DIR: "Sprints",
@@ -82,14 +83,14 @@ export const PROJECT_CONSTANTS = {
         BACKLOG: "[Backlog]_",
         BACKLOGPATTERN: (index: number) => `[Backlog-${index}]_`,
         EPIC: "[Epic]_",
-        EPICPATTERN: (index: number) => `[Epic-${index}]_`,
+        EPICPATTERN: (index: number) => `[${index}]_`,
         SPRINT: "[Sprint]_",
         SPRINTPATTERN: (index: number) => `[Sprint-${index}]_`,
         EPIC_LINK: "../Epics/",
         BACKLOG_LINK: "../Backlogs/",
         SPRINT_LINK: "../Sprints/",
         TASK: "[Task]_",
-        TASKPATTERN: (index: number) => `[Task-${index}]_`,
+        TASKPATTERN: (index: number) => `[${index}]_`,
         TASK_LINK: "../Tasks/",
     },
     ID_PREFIX: {

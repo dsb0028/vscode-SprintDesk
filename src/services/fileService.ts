@@ -1,12 +1,12 @@
-import * as fs from 'fs';
 import * as path from 'path';
-import { PROJECT_CONSTANTS, TASK_CONSTANTS } from '../utils/constant';
-import * as vscode from "vscode";
+import { PROJECT_CONSTANTS } from '../utils/constant';
+import { getHost, getFileSystem } from '../host';
 
 export function readFileSyncSafe(filePath: string): string {
   try {
-    if (!fs.existsSync(filePath)) return '';
-    return fs.readFileSync(filePath, 'utf8');
+    const fileSystem = getFileSystem();
+    if (!fileSystem.exists(filePath)) return '';
+    return fileSystem.readFile(filePath);
   } catch (e) {
     return '';
   }
@@ -14,8 +14,9 @@ export function readFileSyncSafe(filePath: string): string {
 
 export function listMdFiles(dir: string): string[] {
   try {
-    if (!fs.existsSync(dir)) return [];
-    return fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith('.md'));
+    const fileSystem = getFileSystem();
+    if (!fileSystem.exists(dir)) return [];
+    return fileSystem.list(dir).filter(f => f.toLowerCase().endsWith('.md'));
   } catch (e) {
     return [];
   }
@@ -24,23 +25,25 @@ export function listMdFiles(dir: string): string[] {
 export function getExistingTasksDirs(ws: string): string[] {
   const base = path.join(ws, PROJECT_CONSTANTS.SPRINTDESK_DIR);
   const candidates = [path.join(base, PROJECT_CONSTANTS.TASKS_DIR)];
-  const found = candidates.filter(d => fs.existsSync(d));
+  const found = candidates.filter(d => getFileSystem().exists(d));
   return found.length ? found : [path.join(base, PROJECT_CONSTANTS.TASKS_DIR)];
 }
 
 export function fileExists(filePath: string): boolean {
-  try { return fs.existsSync(filePath); } catch { return false; }
+  try { return getFileSystem().exists(filePath); } catch { return false; }
 }
 
 /* [vNext_Feature]: Implement a functions to manipulate files */
 
 // get directories functions
-export function getWorkspaceRoot(uri?: vscode.Uri): string {
-  // If a file or folder URI is provided (like from a sidebar click)
+export function getWorkspaceRoot(uri?: { fsPath: string }): string {
+  const host = getHost();
+
+  // If a file or folder path is provided (like from a sidebar click)
   if (uri) {
-    const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
-    if (workspaceFolder) {
-      return workspaceFolder.uri.fsPath;
+    const folder = host.getWorkspaceFolderForUri?.(uri.fsPath);
+    if (folder) {
+      return folder;
     }
   }
 
@@ -49,13 +52,8 @@ export function getWorkspaceRoot(uri?: vscode.Uri): string {
     return (getWorkspaceRoot as any)._overrideRoot as string;
   }
 
-  // Fallback to first workspace folder
-  const wsFolders = vscode.workspace.workspaceFolders;
-  if (wsFolders && wsFolders.length > 0) {
-    return wsFolders[0].uri.fsPath;
-  }
-
-  return '';
+  // Fallback to host workspace root
+  return host.getWorkspaceRoot() || '';
 }
 // Allow other parts of the extension to override the detected workspace root
 export function setWorkspaceRootOverride(root?: string) {
@@ -78,71 +76,71 @@ export function getBacklogsDir(ws: string): string {
 }
 // [COMMIT]: get files paths functions
 export function getTasksFilesPath(tasksDir: string): string[] {
-  if (!fs.existsSync(tasksDir)) return [];
-  const files = fs.readdirSync(tasksDir);
+  if (!getFileSystem().exists(tasksDir)) return [];
+  const files = getFileSystem().list(tasksDir);
   return files.filter(f => f.toLowerCase().endsWith('.md')).map(f => path.join(tasksDir, f));
 }
 
 export function getEpicsFilesPath(epicsDir: string): string[] {
-  if (!fs.existsSync(epicsDir)) return [];
-  const files = fs.readdirSync(epicsDir);
+  if (!getFileSystem().exists(epicsDir)) return [];
+  const files = getFileSystem().list(epicsDir);
   return files.filter(f => f.toLowerCase().endsWith('.md')).map(f => path.join(epicsDir, f));
 }
 
 export function getBacklogsFilesPath(backlogsDir: string): string[] {
-  if (!fs.existsSync(backlogsDir)) return [];
-  const files = fs.readdirSync(backlogsDir);
+  if (!getFileSystem().exists(backlogsDir)) return [];
+  const files = getFileSystem().list(backlogsDir);
   return files.filter(f => f.toLowerCase().endsWith('.md')).map(f => path.join(backlogsDir, f));
 }
 export function getSprintsFilesPath(sprintsDir: string): string[] {
-  if (!fs.existsSync(sprintsDir)) return [];
-  const files = fs.readdirSync(sprintsDir);
+  if (!getFileSystem().exists(sprintsDir)) return [];
+  const files = getFileSystem().list(sprintsDir);
   return files.filter(f => f.toLowerCase().endsWith('.md')).map(f => path.join(sprintsDir, f));
 }
 
 // [COMMIT]: get files names functions without extensions
 export function getTasksBaseNames(tasksDir: string): string[] {
-  if (!fs.existsSync(tasksDir)) return [];
-  const files = fs.readdirSync(tasksDir);
+  if (!getFileSystem().exists(tasksDir)) return [];
+  const files = getFileSystem().list(tasksDir);
   return files.filter(f => f.toLowerCase().endsWith('.md')).map(f => path.basename(f, '.md'));
 }
 export function getEpicsBaseNames(epicsDir: string): string[] {
-  if (!fs.existsSync(epicsDir)) return [];
-  const files = fs.readdirSync(epicsDir);
+  if (!getFileSystem().exists(epicsDir)) return [];
+  const files = getFileSystem().list(epicsDir);
   return files.filter(f => f.toLowerCase().endsWith('.md')).map(f => path.basename(f, '.md'));
 }
 
 export function getBacklogsBaseNames(backlogsDir: string): string[] {
-  if (!fs.existsSync(backlogsDir)) return [];
-  const files = fs.readdirSync(backlogsDir);
+  if (!getFileSystem().exists(backlogsDir)) return [];
+  const files = getFileSystem().list(backlogsDir);
   return files.filter(f => f.toLowerCase().endsWith('.md')).map(f => path.basename(f, '.md'));
 }
 export function getSprintsBaseNames(sprintsDir: string): string[] {
-  if (!fs.existsSync(sprintsDir)) return [];
-  const files = fs.readdirSync(sprintsDir);
+  if (!getFileSystem().exists(sprintsDir)) return [];
+  const files = getFileSystem().list(sprintsDir);
   return files.filter(f => f.toLowerCase().endsWith('.md')).map(f => path.basename(f, '.md'));
 }
 
 // [COMMIT]: get files names functions extensions
 export function getTasksNames(tasksDir: string): string[] {
-  if (!fs.existsSync(tasksDir)) return [];
-  const files = fs.readdirSync(tasksDir);
+  if (!getFileSystem().exists(tasksDir)) return [];
+  const files = getFileSystem().list(tasksDir);
   return files.filter(f => f.toLowerCase().endsWith('.md'));
 }
 export function getEpicsNames(epicsDir: string): string[] {
-  if (!fs.existsSync(epicsDir)) return [];
-  const files = fs.readdirSync(epicsDir);
+  if (!getFileSystem().exists(epicsDir)) return [];
+  const files = getFileSystem().list(epicsDir);
   console.log('[getEpicsNames]: Epics files found:', files);
   return files.filter(f => f.toLowerCase().endsWith('.md'));
 }
 export function getBacklogsNames(backlogsDir: string): string[] {
-  if (!fs.existsSync(backlogsDir)) return [];
-  const files = fs.readdirSync(backlogsDir);
+  if (!getFileSystem().exists(backlogsDir)) return [];
+  const files = getFileSystem().list(backlogsDir);
   return files.filter(f => f.toLowerCase().endsWith('.md'));
 }
 export function getSprintsNames(sprintsDir: string): string[] {
-  if (!fs.existsSync(sprintsDir)) return [];
-  const files = fs.readdirSync(sprintsDir);
+  if (!getFileSystem().exists(sprintsDir)) return [];
+  const files = getFileSystem().list(sprintsDir);
   return files.filter(f => f.toLowerCase().endsWith('.md'));
 }
 

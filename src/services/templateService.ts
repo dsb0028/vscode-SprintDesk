@@ -1,5 +1,3 @@
-import * as path from 'path';
-
 // [vNext]: manipulate Metadata
 // first creation of the file metadata
 

@@ -2,13 +2,14 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as fileService from '../services/fileService';
-import * as epicController from '../controller/epicController';
-import * as taskController from '../controller/taskController';
+import * as epicService from '../services/epicService';
+import * as taskService from '../services/taskService';
 import { UI_CONSTANTS, PROJECT_CONSTANTS, TASK_CONSTANTS } from '../utils/constant';
 import matter from 'gray-matter';
-import * as epicService from '../services/epicService';
 import { getTaskPath, removeEmojiFromTaskLabel } from '../utils/taskUtils';
 import { getEpicPath } from '../utils/backlogUtils';
+import { getDataService } from '../data/DataService';
+import { Task, Epic } from '../data/types';
 
 
 export class EpicsTreeItem extends vscode.TreeItem {
@@ -18,18 +19,22 @@ export class EpicsTreeItem extends vscode.TreeItem {
     public readonly children: EpicsTreeItem[] = [],
     public readonly filePath?: string,
     public readonly taskPath?: string,
-    public readonly sourceEpicPath?: string
+    public readonly sourceEpicPath?: string,
+    public readonly epicId?: string,
+    public readonly taskId?: string
   ) {
     super(label, collapsibleState);
 
     if (filePath) {
       // Setup epic item
+      console.log('filePath: ', filePath)
       this.contextValue = 'epic';
       this.resourceUri = vscode.Uri.file(filePath);
 
       // Count tasks in epic
       try {
         const { data } = matter.read(filePath);
+        console.log("data file: ", data)
         const taskCount = data.tasks?.length;
         this.iconPath = new vscode.ThemeIcon('milestone');
         this.description = `${UI_CONSTANTS.EMOJI.COMMON.TASK_LIST} ${taskCount ? taskCount : 0} tasks`;
@@ -127,109 +132,127 @@ export class EpicsTreeDataProvider implements vscode.TreeDataProvider<EpicsTreeI
   }
 
   private async handleTaskDropFromTasks(target: EpicsTreeItem, handleData: any): Promise<void> {
-    let taskFilePath: string | undefined;
-    let taskName: string | undefined;
-
-    if (handleData.itemHandles && Array.isArray(handleData.itemHandles) && handleData.itemHandles.length > 0) {
-      const raw = String(handleData.itemHandles[0] || '');
-      const parts = raw.split(' ');
-      taskName = fileService.getTaskBaseName(parts[1]);
+    const taskId = handleData._id;
+    if (!taskId) {
+      throw new Error('No task ID found in drop data');
     }
-    const taskPath = fileService.createTaskRelativePath(taskName!);
 
-    await this.addTaskToEpic(target.filePath!, taskPath);
+    if (!target.epicId) {
+      throw new Error('No epic ID found in drop target');
+    }
+
+    await epicService.addTaskToEpicById(target.epicId, taskId);
+    this.refresh();
   }
   private async handleTaskDropFromBacklogs(target: EpicsTreeItem, handleData: any): Promise<void> {
-    let taskFilePath: string | undefined;
-    let taskName: string | undefined;
-    if (handleData.itemHandles && Array.isArray(handleData.itemHandles) && handleData.itemHandles.length > 0) {
-      const raw = String(handleData.itemHandles[0] || '');
-      const parts = raw.split(' ');
-      taskName = parts[1] || parts.pop() || raw;
+    const taskId = handleData._id;
+    if (!taskId) {
+      throw new Error('No task ID found in drop data');
     }
-    const taskPath = getTaskPath(taskName || path.basename(taskFilePath || ''));
- 
-    await this.addTaskToEpic(target.filePath!, taskPath);
+
+    if (!target.epicId) {
+      throw new Error('No epic ID found in drop target');
+    }
+
+    await epicService.addTaskToEpicById(target.epicId, taskId);
     this.refresh();
   }
   private async handleTaskDropFromEpics(target: EpicsTreeItem, handleData: any): Promise<void> {
-    // Move between epics
-    const { taskName, epic } = handleData;
-
-    const taskPath = getTaskPath(taskName);
-    const epicPath = getEpicPath(epic.epicName);
-    console.log(path.basename(target.filePath!))
-    await this.addTaskToEpic(target.filePath!, taskPath);
-    await this.removeTaskFromEpic(epicPath, taskPath);
-    await this.updateTaskEpic(taskName, path.basename(target.filePath!));
-
-    await this.refresh();
-  }
-  private async handleTaskDropFromSprints(target: EpicsTreeItem, handleData: any): Promise<void> {
-    let taskFilePath: string | undefined;
-    let taskName: string | undefined;
-    if (handleData.itemHandles && Array.isArray(handleData.itemHandles) && handleData.itemHandles.length > 0) {
-      const raw = String(handleData.itemHandles[0] || '');
-      const parts = raw.split(' ');
-      taskName = parts[1] || parts.pop() || raw;
+    const taskId = handleData._id;
+    if (!taskId) {
+      throw new Error('No task ID found in drop data');
     }
-    const taskPath = getTaskPath(taskName || path.basename(taskFilePath || ''));
 
-    await this.addTaskToEpic(target.filePath!, taskPath);
+    if (!target.epicId) {
+      throw new Error('No epic ID found in drop target');
+    }
+
+    const sourceEpicId = handleData.epic?.epicId || null;
+    
+    if (sourceEpicId) {
+      await epicService.removeTaskFromEpicById(sourceEpicId, taskId);
+    }
+    
+    await epicService.addTaskToEpicById(target.epicId, taskId);
     this.refresh();
   }
-  private async addTaskToEpic(epicPath: string, taskPath: string): Promise<void> {
-    await epicController.addTaskToEpic(fileService.createEpicRelativePath(fileService.getEpicBaseName(epicPath)), taskPath, this.workspaceRoot);
+  private async handleTaskDropFromSprints(target: EpicsTreeItem, handleData: any): Promise<void> {
+    const taskId = handleData._id;
+    if (!taskId) {
+      throw new Error('No task ID found in drop data');
+    }
+
+    if (!target.epicId) {
+      throw new Error('No epic ID found in drop target');
+    }
+
+    await epicService.addTaskToEpicById(target.epicId, taskId);
+    this.refresh();
+  }
+private async addTaskToEpic(epicPath: string, taskPath: string): Promise<void> {
+    const epicName = fileService.getEpicBaseName(epicPath) || path.basename(epicPath, '.md');
+    const taskName = path.basename(taskPath, '.md');
+    epicService.addTaskToEpic(epicName, taskName);
     this.refresh();
     void vscode.window.showInformationMessage(`Task added to epic`);
 
   }
   private async removeTaskFromEpic(epicName: string, taskPath: string): Promise<void> {
-    await epicController.removeTaskFromEpic(epicName, taskPath);
+    epicService.removeTaskFromEpic(epicName, taskPath);
   }
-  private async getTasksFromEpicName(epicName: string): Promise<EpicsTreeItem[]> {
+private async getTasksFromEpicName(epicName: string): Promise<EpicsTreeItem[]> {
     const treeItemsRaw = epicService.getTasksFromEpic(epicName);
+    const epics = epicService.getEpics('');
+    const epic = epics.find(e => e.name === epicName);
+    const epicId = epic?.id;
+    
     return (treeItemsRaw || []).map((item: any) => {
-      const label = path.basename(item.path || '');
-      const treeItem = new EpicsTreeItem(
-        label,
-        item.collapsibleState || vscode.TreeItemCollapsibleState.None,
+      return new EpicsTreeItem(
+        item.label,
+        vscode.TreeItemCollapsibleState.None,
         [],
         undefined,
         item.path,
-        epicName
+        undefined,
+        epicId,
+        item.id
       );
-      if (item.command) {
-        treeItem.command = item.command;
-      }
-      treeItem.tooltip = `Task: ${item.title || item.name || item.label}\nPath: ${item.path}\nEpic: ${epicName}`;
-      return treeItem;
     });
   }
-  private async updateTaskEpic (taskName: string, epicName: string): Promise<void>{
+  private async getTasksFromEpicId(epicId: string): Promise<EpicsTreeItem[]> {
+    const treeItemsRaw = epicService.getTasksFromEpicById(epicId);
+    return (treeItemsRaw || []).map((item: any) => {
+      return new EpicsTreeItem(
+        item.label,
+        vscode.TreeItemCollapsibleState.None,
+        [],
+        undefined,
+        item.path,
+        undefined,
+        epicId,
+        item.id
+      );
+    });
+  }
+  private updateTaskEpic(taskName: string, epicName: string): void {
     const ws = this.getWorkspaceRoot();
     const taskPath = path.join(ws || '','.SprintDesk', 'Tasks', taskName);
-    await taskController.updateTaskEpic(taskPath, {title: epicName, path: `../Epics/${epicName}`});
+    taskService.updateTaskByPath(taskPath, { epic: epicName });
   }
   // handle drag and drop
   handleDrag(source: readonly EpicsTreeItem[], dataTransfer: vscode.DataTransfer): void {
     try {
       if (source.length > 0) {
         const taskItem = source[0];
-        console.log('Dragging task item:', taskItem);
-        if (!taskItem.taskPath) {
-          throw new Error('No task path found for drag operation');
-        }
-
-        // Create a consistent task data object
+        
         const taskData = {
+          _id: taskItem.taskId,
           type: 'task',
           label: taskItem.label,
-          taskName: removeEmojiFromTaskLabel(taskItem.label),
           path: taskItem.taskPath,
           epic: {
             type: 'epic',
-            epicName: taskItem.sourceEpicPath || taskItem.filePath
+            epicId: taskItem.epicId
           }
         };
 
@@ -237,7 +260,9 @@ export class EpicsTreeDataProvider implements vscode.TreeDataProvider<EpicsTreeI
           new vscode.DataTransferItem(JSON.stringify(taskData))
         );
 
-        void vscode.window.showInformationMessage(`Dragging task: ${taskItem.label}`);
+        dataTransfer.set('text/plain',
+          new vscode.DataTransferItem(JSON.stringify(taskData))
+        );
       }
     } catch (error) {
       void vscode.window.showErrorMessage('Failed to start drag: ' + (error as Error).message);
@@ -245,42 +270,94 @@ export class EpicsTreeDataProvider implements vscode.TreeDataProvider<EpicsTreeI
   }
   async handleDrop(target: EpicsTreeItem | undefined, dataTransfer: vscode.DataTransfer): Promise<void> {
     try {
+      console.log('===== Epics handleDrop =====');
+      console.log('target:', target?.label, target?.epicId);
+      
       if (!target?.filePath || target.contextValue !== 'epic') {
         throw new Error('Invalid drop target: must be an epic');
       }
 
-      const taskSources = {
+      // Try epics mime type first (dragging from another epic)
+      const epicsItem = dataTransfer.get('application/vnd.code.tree.sprintdesk-epics');
+      if (epicsItem && epicsItem.value) {
+        const handleData = JSON.parse(epicsItem.value as string);
+        console.log('epics data:', handleData);
+        if (handleData._id) {
+          await this.handleTaskDropFromEpics(target, handleData);
+          return;
+        }
+        // Try to get task ID from path
+        if (handleData.path) {
+          const taskId = path.basename(handleData.path, '.md');
+          await this.handleTaskDropFromEpics(target, { _id: taskId });
+          return;
+        }
+      }
+
+      // Try text/plain (dragging from tasks)
+      const textItem = dataTransfer.get('text/plain');
+      console.log('text/plain:', textItem);
+      if (textItem && textItem.value) {
+        try {
+          const handleData = JSON.parse(textItem.value as string);
+          console.log('text/plain parsed:', handleData);
+          if (handleData._id) {
+            await this.handleTaskDropFromEpics(target, handleData);
+            return;
+          }
+          // Try to get task ID from path
+          if (handleData.path) {
+            const taskId = path.basename(handleData.path, '.md');
+            await this.handleTaskDropFromEpics(target, { _id: taskId });
+            return;
+          }
+        } catch (e) {
+          console.log('text/plain parse error:', e);
+        }
+      }
+
+      // Fallback: try other tree mime types
+      const taskSources: { [key: string]: string } = {
         tasks: 'application/vnd.code.tree.sprintdesk-tasks',
         backlogs: 'application/vnd.code.tree.sprintdesk-backlogs',
-        epics: 'application/vnd.code.tree.sprintdesk-epics',
         sprints: 'application/vnd.code.tree.sprintdesk-sprints'
       };
 
       for (const [source, mimeType] of Object.entries(taskSources)) {
         const dataItem = dataTransfer.get(mimeType);
-        if (dataItem) {
+        console.log(`Checking ${source} (${mimeType}):`, dataItem?.value);
+        if (dataItem && dataItem.value) {
           const handleData = JSON.parse(dataItem.value as string);
-          switch (source) {
-            case 'tasks':
-              await this.handleTaskDropFromTasks(target, handleData);
-              break;
-            case 'backlogs':
-              await this.handleTaskDropFromBacklogs(target, handleData);
-              break;
-            case 'epics':
-              await this.handleTaskDropFromEpics(target, handleData);
-              break;
-            case 'sprints':
-              await this.handleTaskDropFromSprints(target, handleData);
-              break;
+          
+          // Handle VS Code tree internal format (itemHandles)
+          let taskId = handleData._id;
+          if (!taskId && handleData.itemHandles && Array.isArray(handleData.itemHandles) && handleData.itemHandles.length > 0) {
+            const raw = String(handleData.itemHandles[0] || '');
+            const parts = raw.split(':');
+            const taskName = parts[parts.length - 1]?.trim();
+            if (taskName) {
+              taskId = taskName.replace('.md', '').replace(' ⏳', '');
+            }
           }
-          return;
+          
+          if (taskId) {
+            switch (source) {
+              case 'tasks':
+                await this.handleTaskDropFromTasks(target, { _id: taskId });
+                return;
+              case 'backlogs':
+                await this.handleTaskDropFromBacklogs(target, { _id: taskId });
+                return;
+              case 'sprints':
+                await this.handleTaskDropFromSprints(target, { _id: taskId });
+                return;
+            }
+          }
         }
       }
 
       throw new Error('No valid task data found in drop');
     } catch (error: unknown) {
-      console.error('Drop error:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
       void vscode.window.showErrorMessage(`Failed to move task: ${errorMessage}`);
     }
@@ -293,15 +370,14 @@ export class EpicsTreeDataProvider implements vscode.TreeDataProvider<EpicsTreeI
       .trim();
     return cleaned || base;
   }
-  // tree visualization methods
-  private async getEpicsTree(workspaceRoot: string): Promise<EpicsTreeItem[]> {
-    const epicsDir = path.join(workspaceRoot, PROJECT_CONSTANTS.SPRINTDESK_DIR, PROJECT_CONSTANTS.EPICS_DIR);
-    const files = fileService.listMdFiles(epicsDir);
+private async getEpicsTree(workspaceRoot: string): Promise<EpicsTreeItem[]> {
+    const epics = epicService.getEpics(workspaceRoot);
 
-    const items = files.map(name => {
-      const filePath = path.join(epicsDir, name);
-      const label = name;
-      return new EpicsTreeItem(label, vscode.TreeItemCollapsibleState.Collapsed, [], filePath);
+    const items = epics.map(epic => {
+      const filePath = epic.path || '';
+      const label = epic.name || epic.title;
+
+      return new EpicsTreeItem(label, vscode.TreeItemCollapsibleState.Collapsed, [], filePath, undefined, undefined, epic.id);
     });
 
     items.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' }));
@@ -320,7 +396,11 @@ export class EpicsTreeDataProvider implements vscode.TreeDataProvider<EpicsTreeI
     }
 
     if (element.filePath) {
-      return this.getTasksFromEpicName(path.basename(element.filePath));
+      if (element.epicId) {
+        return this.getTasksFromEpicId(element.epicId);
+      }
+      const epicName = path.basename(element.filePath, '.md');
+      return this.getTasksFromEpicName(epicName);
     }
 
     return [];

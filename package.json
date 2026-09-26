@@ -3,13 +3,13 @@
   "publisher": "khmamed",
   "displayName": "vscode-SprintDesk",
   "description": "A Visual Studio Code extension for managing sprints and tasks in an agile development workflow",
-  "version": "0.3.9",
+  "version": "0.4.0",
   "repository": {
     "url": "https://github.com/khmmamed/vscode-SprintDesk.git",
     "type": "git"
   },
   "engines": {
-    "vscode": "^1.71.0"
+    "vscode": "^1.99.0"
   },
   "categories": [
     "Other"
@@ -21,19 +21,22 @@
   "main": "./dist/extension.js",
   "scripts": {
     "vscode:prepublish": "npm run package",
-    "compile": "webpack",
+    "compile": "webpack --mode development --config ./webpack/extension.config.js",
     "watch": "npm-run-all --parallel watch:*",
     "watch:ext": "webpack --mode development --watch --config ./webpack/extension.config.js",
     "watch:wv": "webpack serve --mode development --config ./webpack/webview.config.js",
     "package": "npm run clean && npm-run-all --parallel package:*",
     "package:ext": "webpack --mode production --config ./webpack/extension.config.js",
     "package:wv": "webpack --mode production --config ./webpack/webview.config.js",
-    "compile-tests": "tsc -p . --outDir out",
-    "watch-tests": "tsc -p . -w --outDir out",
+    "compile-tests": "tsc -p . --outDir out --noEmit false",
+    "test:calendar": "npm run compile-tests && node out/calendar/sprintCalendar.test.js",
+    "watch-tests": "tsc -p . -w --outDir out --noEmit false",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
     "clean": "rimraf dist",
-    "test": "node ./out/test/runTest.js"
+    "test": "node ./out/test/runTest.js",
+    "mcp": "rimraf out && tsc -p . --outDir out --noEmit false && node out/mcp/stdioServer.js",
+    "standup": "rimraf out && tsc -p . --outDir out --noEmit false && node out/cli/standup.js"
   },
   "contributes": {
     "keybindings": [
@@ -116,6 +119,11 @@
         "icon": "$(add)"
       },
       {
+        "command": "sprintdesk.addBacklog",
+        "title": "SprintDesk: Add Backlog",
+        "icon": "$(add)"
+      },
+      {
         "command": "sprintdesk.addTaskToBacklog",
         "title": "SprintDesk: Add Task to Backlog",
         "icon": "$(add)"
@@ -124,6 +132,11 @@
         "command": "sprintdesk.refresh",
         "title": "SprintDesk: Refresh",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "sprintdesk.startMcp",
+        "title": "SprintDesk: Start MCP Server",
+        "icon": "$(server)"
       },
       {
         "command": "sprintdesk.addExistingTasksToSprint",
@@ -139,6 +152,87 @@
         "command": "sprintdesk.viewProjects",
         "title": "SprintDesk: Projects",
         "icon": "$(folder)"
+      },
+      {
+        "command": "sprintdesk.createTaskFromRepo",
+        "title": "SprintDesk: Create Task from Repository"
+      },
+      {
+        "command": "sprintdesk.createEpicFromRepo",
+        "title": "SprintDesk: Create Epic from Repository"
+      },
+      {
+        "command": "sprintdesk.createSprintFromRepo",
+        "title": "SprintDesk: Create Sprint from Repository"
+      },
+      {
+        "command": "sprintdesk.createBacklogFromRepo",
+        "title": "SprintDesk: Create Backlog from Repository"
+      },
+      {
+        "command": "sprintdesk.viewTeam",
+        "title": "SprintDesk: View Team",
+        "icon": "$(account)"
+      },
+{
+        "command": "sprintdesk.runAgent",
+        "title": "SprintDesk: Run Agent",
+        "icon": "$(play)"
+      },
+      {
+        "command": "sprintdesk.syncTeamFromGit",
+        "title": "SprintDesk: Sync Team from Git",
+        "icon": "$(git-fetch)"
+      },
+      {
+        "command": "sprintdesk.viewHistory",
+        "title": "SprintDesk: View History",
+        "icon": "$(history)"
+      },
+      {
+        "command": "sprintdesk.getItemHistory",
+        "title": "SprintDesk: Get Item History",
+        "icon": "$(clock)"
+      },
+      {
+        "command": "sprintdesk.viewWorkforce",
+        "title": "SprintDesk: View Workforce",
+        "icon": "$(organization)"
+      },
+      {
+        "command": "sprintdesk.addEmployee",
+        "title": "SprintDesk: Add Employee",
+        "icon": "$(person-add)"
+      },
+      {
+        "command": "sprintdesk.createTeam",
+        "title": "SprintDesk: Create Team",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "sprintdesk.assignToTeam",
+        "title": "SprintDesk: Assign to Team",
+        "icon": "$(add)"
+      },
+      {
+        "command": "sprintdesk.setTeamLead",
+        "title": "SprintDesk: Set Team Lead",
+        "icon": "$(star)"
+      },
+      {
+        "command": "sprintdesk.setEmployeeStatus",
+        "title": "SprintDesk: Set Availability",
+        "icon": "$(circle-filled)"
+      },
+      {
+        "command": "sprintdesk.removeEmployee",
+        "title": "SprintDesk: Remove Employee",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "sprintdesk.syncWorkforceFromTeam",
+        "title": "SprintDesk: Sync Workforce from Team",
+        "icon": "$(sync)"
       }
     ],
     "viewsContainers": {
@@ -171,6 +265,18 @@
         {
           "id": "sprintdesk-tasks",
           "name": "Tasks"
+        },
+        {
+          "id": "sprintdesk-team",
+          "name": "Team"
+        },
+        {
+          "id": "sprintdesk-workforce",
+          "name": "Workforce"
+        },
+        {
+          "id": "sprintdesk-history",
+          "name": "History"
         }
       ]
     },
@@ -189,19 +295,59 @@
           "group": "navigation"
         },
         {
-          "command": "sprintdesk.addTask",
-          "when": "view == sprintdesk-tasks",
-          "group": "navigation@1"
-        },
-        {
           "command": "sprintdesk.addEpic",
           "when": "view == sprintdesk-epics",
           "group": "navigation"
         },
         {
+          "command": "sprintdesk.addBacklog",
+          "when": "view == sprintdesk-backlogs",
+          "group": "navigation"
+        },
+        {
+          "command": "sprintdesk.addTask",
+          "when": "view == sprintdesk-tasks",
+          "group": "navigation@1"
+        },
+        {
+          "command": "sprintdesk.addTask",
+          "when": "view == sprintdesk-repositories",
+          "group": "navigation@1"
+        },
+        {
           "command": "sprintdesk.refresh",
           "when": "view =~ /^sprintdesk-/",
           "group": "navigation@9"
+        },
+        {
+          "command": "sprintdesk.syncTeamFromGit",
+          "when": "view == sprintdesk-team",
+          "group": "navigation"
+        },
+        {
+          "command": "sprintdesk.addAgent",
+          "when": "view == sprintdesk-team",
+          "group": "navigation"
+        },
+        {
+          "command": "sprintdesk.addEmployee",
+          "when": "view == sprintdesk-workforce",
+          "group": "navigation@1"
+        },
+        {
+          "command": "sprintdesk.createTeam",
+          "when": "view == sprintdesk-workforce",
+          "group": "navigation@2"
+        },
+        {
+          "command": "sprintdesk.syncWorkforceFromTeam",
+          "when": "view == sprintdesk-workforce",
+          "group": "navigation@3"
+        },
+        {
+          "command": "sprintdesk.getItemHistory",
+          "when": "view == sprintdesk-history",
+          "group": "navigation"
         }
       ],
       "editor/context": [
@@ -251,21 +397,217 @@
           "command": "sprintdesk.editTaskRaw",
           "when": "view == sprintdesk-tasks && viewItem == task",
           "group": "inline@1"
+        },
+        {
+          "command": "sprintdesk.createTaskFromRepo",
+          "when": "view == sprintdesk-repositories && viewItem == repository",
+          "group": "create@1"
+        },
+        {
+          "command": "sprintdesk.createEpicFromRepo",
+          "when": "view == sprintdesk-repositories && viewItem == repository",
+          "group": "create@2"
+        },
+        {
+          "command": "sprintdesk.createSprintFromRepo",
+          "when": "view == sprintdesk-repositories && viewItem == repository",
+          "group": "create@3"
+        },
+        {
+          "command": "sprintdesk.createBacklogFromRepo",
+          "when": "view == sprintdesk-repositories && viewItem == repository",
+          "group": "create@4"
+        },
+        {
+          "command": "sprintdesk.runAgent",
+          "when": "view == sprintdesk-team",
+          "group": "inline@0"
+        },
+        {
+          "command": "sprintdesk.assignToTeam",
+          "when": "view == sprintdesk-workforce && viewItem =~ /^employee/",
+          "group": "inline@1"
+        },
+        {
+          "command": "sprintdesk.setEmployeeStatus",
+          "when": "view == sprintdesk-workforce && viewItem =~ /^employee/",
+          "group": "inline@2"
+        },
+        {
+          "command": "sprintdesk.removeEmployee",
+          "when": "view == sprintdesk-workforce && viewItem =~ /^employee/",
+          "group": "inline@3"
+        },
+        {
+          "command": "sprintdesk.setTeamLead",
+          "when": "view == sprintdesk-workforce && viewItem == workforceTeam",
+          "group": "inline@1"
         }
       ]
-    }
+    },
+    "configuration": {
+      "type": "object",
+      "title": "SprintDesk",
+      "properties": {
+        "sprintdesk.projectPrefix": {
+          "type": "string",
+          "default": "SPD",
+          "description": "Project prefix used for code display (e.g., SPD-101)",
+          "scope": "resource"
+        },
+        "sprintdesk.epicPrefix": {
+          "type": "string",
+          "default": "epic_",
+          "description": "Epic ID prefix (for internal use)",
+          "scope": "resource"
+        },
+        "sprintdesk.epicStartNumber": {
+          "type": "number",
+          "default": 1,
+          "description": "Starting number for epic IDs",
+          "scope": "resource"
+        },
+        "sprintdesk.epicPadding": {
+          "type": "number",
+          "default": 2,
+          "description": "Number of digits for epic ID padding",
+          "scope": "resource"
+        },
+        "sprintdesk.epicMdFilenamePattern": {
+          "type": "string",
+          "default": "[Epic]_${title}.md",
+          "description": "Template for epic .md filename",
+          "scope": "resource",
+          "markdownDescription": "Template for epic .md filename. Use ${title} for epic title."
+        },
+        "sprintdesk.taskPrefix": {
+          "type": "string",
+          "default": "task_",
+          "description": "Task ID prefix (e.g., task_ → task_100)",
+          "scope": "resource",
+          "markdownDescription": "Prefix used when generating new task IDs. Include trailing underscore if desired."
+        },
+        "sprintdesk.taskStartNumber": {
+          "type": "number",
+          "default": 100,
+          "description": "Starting number for task IDs",
+          "scope": "resource"
+        },
+        "sprintdesk.taskPadding": {
+          "type": "number",
+          "default": 3,
+          "description": "Number of digits for task ID padding",
+          "scope": "resource"
+        },
+        "sprintdesk.taskMdFilenamePattern": {
+          "type": "string",
+          "default": "[task-${taskNumber}]_${tasktitle}.md",
+          "description": "Template for task .md filename",
+          "scope": "resource",
+          "markdownDescription": "Template for task .md filename. Use ${taskNumber} for task code and ${tasktitle} for title."
+        },
+        "sprintdesk.backlogMdFilenamePattern": {
+          "type": "string",
+          "default": "[Backlog]_${name}.md",
+          "description": "Template for backlog .md filename",
+          "scope": "resource",
+          "markdownDescription": "Template for backlog .md filename. Use ${name} for backlog name."
+        },
+        "sprintdesk.sprintPrefix": {
+          "type": "string",
+          "default": "sprint_",
+          "description": "Sprint ID prefix",
+          "scope": "resource"
+        },
+        "sprintdesk.sprintStartNumber": {
+          "type": "number",
+          "default": 1,
+          "description": "Starting number for sprint IDs",
+          "scope": "resource"
+        },
+        "sprintdesk.sprintPadding": {
+          "type": "number",
+          "default": 1,
+          "description": "Number of digits for sprint ID padding",
+          "scope": "resource"
+        },
+        "sprintdesk.sprintMdFilenamePattern": {
+          "type": "string",
+          "default": "[Sprint]_${id}.md",
+          "description": "Template for sprint .md filename",
+          "scope": "resource",
+          "markdownDescription": "Template for sprint .md filename. Use ${id} for sprint id."
+        },
+        "sprintdesk.defaultBacklog": {
+          "type": "string",
+          "default": "features",
+          "description": "Default backlog for new tasks",
+          "scope": "resource",
+          "markdownDescription": "Name of the backlog where new tasks are created by default."
+        },
+        "sprintdesk.defaultStatus": {
+          "type": "string",
+          "default": "waiting",
+          "description": "Default status for new tasks",
+          "enum": [
+            "waiting",
+            "in-progress",
+            "done",
+            "blocked",
+            "cancelled"
+          ],
+          "enumDescriptions": [
+            "Not started yet",
+            "Work in progress",
+            "Completed",
+            "Blocked — requires attention",
+            "Cancelled / won't do"
+          ],
+          "scope": "resource"
+        },
+        "sprintdesk.defaultPriority": {
+          "type": "string",
+          "default": "medium",
+          "description": "Default priority for new tasks",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "enumDescriptions": [
+            "Low priority",
+            "Normal priority",
+            "High priority"
+          ],
+          "scope": "resource"
+        },
+        "sprintdesk.showIds": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show IDs in task labels",
+          "scope": "resource"
+        }
+      }
+    },
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "sprintdesk-mcp",
+        "label": "SprintDesk MCP Server"
+      }
+    ]
   },
   "devDependencies": {
     "@estruyf/vscode": "^1.1.0",
     "@types/d3-dispatch": "^2.0.0",
     "@types/glob": "^7.2.0",
+    "@types/js-yaml": "^4.0.9",
     "@types/minimatch": "^5.1.2",
     "@types/mocha": "^9.1.1",
     "@types/node": "16.x",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@types/uuid": "^8.3.4",
-    "@types/vscode": "^1.71.0",
+    "@types/vscode": "^1.99.0",
     "@types/webpack": "^5.28.1",
     "@types/webpack-dev-server": "^4.7.2",
     "@typescript-eslint/eslint-plugin": "^5.31.0",

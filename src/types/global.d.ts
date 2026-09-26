@@ -22,6 +22,7 @@ declare global {
             assignee?: string;
             objective?: string;
             path?: string;
+            relativePath?: string;
 
             // audit fields
             createdAt?: string;
@@ -39,6 +40,7 @@ declare global {
         interface EpicMetadata {
             _id?: number;
             title: string;
+            category?: string;
             description?: string;
             priority?: Priority;
             status?: EpicStatus;
@@ -147,6 +149,7 @@ declare global {
             updated_at?: string;
             objective?: string;
             path?: string;
+            relativePath?: string;
         }
     }
 }

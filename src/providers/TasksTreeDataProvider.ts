@@ -3,10 +3,14 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { PROJECT_CONSTANTS, UI_CONSTANTS } from '../utils/constant';
 import matter from 'gray-matter';
-import * as taskController from '../controller/taskController';
+import * as taskService from '../services/taskService';
 import * as fileService from '../services/fileService';
+import { SprintDeskItem } from '../utils/SprintDeskItem';
+import { getDataService } from '../data/DataService';
+import { Task } from '../data/types';
 interface TaskData {
   _id: string;
+  name: string;
   title: string;
   type: string;
   status: string;
@@ -15,15 +19,17 @@ interface TaskData {
     _id: string;
     title: string;
     path: string;
-  };
+  } | null;
   path: string;
 }
 
 export class TaskTreeItem extends vscode.TreeItem {
   public readonly taskData: TaskData;
+  private taskObj?: Task;
 
   constructor(
     taskData: TaskData,
+    taskObj?: Task,
     // absolute path to the markdown file on disk (preferred)
     absoluteFilePath?: string,
     public readonly collapsibleState: vscode.TreeItemCollapsibleState = vscode.TreeItemCollapsibleState.None
@@ -39,6 +45,8 @@ export class TaskTreeItem extends vscode.TreeItem {
     let resourceFsPath: string | undefined = undefined;
     if (absoluteFilePath) {
       resourceFsPath = absoluteFilePath;
+    } else if (taskData.path) {
+      resourceFsPath = taskData.path;
     } else {
       const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
       try {
@@ -69,9 +77,11 @@ export class TaskTreeItem extends vscode.TreeItem {
   private getStatusEmoji(status: string): string {
     switch (status.toLowerCase()) {
       case 'not-started': return '⏳';
+      case 'waiting': return '⏳';
       case 'in-progress': return '🔄';
       case 'done': return '✅';
       case 'blocked': return '⛔';
+      case 'cancelled': return '❌';
       default: return '⏳';
     }
   }
@@ -97,9 +107,18 @@ export class TaskTreeItem extends vscode.TreeItem {
   }
 
   private setupVisuals(): void {
- 
     const statusEmoji = this.getStatusEmoji(this.taskData.status);
-    this.label = `${statusEmoji} ${path.basename(this.taskData.path)} `;
+
+    let filename = path.basename(this.taskData.path);
+    if (this.taskObj) {
+      const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (ws) {
+        const dataService = getDataService(ws);
+        filename = dataService.getTaskFilename(this.taskObj);
+      }
+    }
+
+    this.label = `${this.taskData.name || this.taskData.title} ${statusEmoji}`;
 
     // Set description with priority and epic
     const description = [this.getPriorityEmoji(this.taskData.priority)];
@@ -148,7 +167,6 @@ export class TasksTreeDataProvider implements vscode.TreeDataProvider<TaskTreeIt
     const taskItem = source[0];
     const taskData = taskItem.taskData;
 
-    // Create a direct task data transfer without wrapping
     const transferData = {
       _id: taskData._id,
       title: taskData.title,
@@ -159,8 +177,14 @@ export class TasksTreeDataProvider implements vscode.TreeDataProvider<TaskTreeIt
       path: taskData.path
     };
 
+    const jsonString = JSON.stringify(transferData);
+
     dataTransfer.set('application/vnd.code.tree.sprintdesk-tasks',
-      new vscode.DataTransferItem(JSON.stringify(transferData))
+      new vscode.DataTransferItem(jsonString)
+    );
+
+    dataTransfer.set('text/plain',
+      new vscode.DataTransferItem(jsonString)
     );
   }
 
@@ -179,34 +203,28 @@ export class TasksTreeDataProvider implements vscode.TreeDataProvider<TaskTreeIt
     }
 
     if (!element) {
-      // Root level: list all tasks under .SprintDesk/Tasks
-      const taskFiles = taskController.readTasks(ws);
+      // Load tasks directly from YAML (source of truth)
+      const tasks = taskService.loadTasks();
 
-      return taskFiles.map(file => {
+      return tasks.map((task: Task) => {
+        // Get the MD file path from the task's path field
+        const mdPath = task.path || '';
 
-        try {
-          const { data } = matter.read(file);
+        const taskData: TaskData = {
+          _id: task.id,
+          name: task.name || '',
+          title: task.title,
+          type: task.type,
+          status: task.status,
+          priority: task.priority,
+          epic: task.epic ? { _id: task.epic, title: task.epic, path: '' } : null,
+          path: mdPath
+        };
 
-          // Create structured task data
-          const taskData = {
-            _id: data._id,
-            title: data.title,
-            type: data.type,
-            status: data.status || 'not-started',
-            priority: data.priority || 'low',
-            epic: data.epic,
-            path: data.path
-          };
+        // Create TreeItem with task data and MD file path
+        const item = new TaskTreeItem(taskData, task, mdPath);
 
-          // Create TreeItem with taskData and pass the absolute file path so
-          // the item can open the correct file when clicked.
-          const item = new TaskTreeItem(taskData, file);
-
-          return item;
-        } catch (error) {
-          console.error(`Error creating task item:`, error);
-          return null;
-        }
+        return item;
       }).filter(item => item !== null) as TaskTreeItem[];
     }
 

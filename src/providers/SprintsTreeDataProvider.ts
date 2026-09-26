@@ -2,12 +2,13 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as fileService from '../services/fileService';
-import * as sprintController from '../controller/sprintController';
 import * as sprintService from '../services/sprintService';
 import { UI_CONSTANTS, PROJECT_CONSTANTS, TASK_CONSTANTS } from '../utils/constant';
 import matter from 'gray-matter';
 import { getTaskPath, removeEmojiFromTaskLabel } from '../utils/taskUtils';
-import { getSprintPath } from '../controller/sprintController';
+import { getDataService } from '../data/DataService';
+import { getSprintPath } from '../services/sprintService';
+import { Task, Sprint } from '../data/types';
 
 export class SprintsTreeItem extends vscode.TreeItem {
   constructor(
@@ -16,7 +17,9 @@ export class SprintsTreeItem extends vscode.TreeItem {
     public readonly children: SprintsTreeItem[] = [],
     public readonly filePath?: string,
     public readonly taskPath?: string,
-    public readonly sourceSprintPath?: string
+    public readonly sourceSprintPath?: string,
+    public readonly sprintId?: string,
+    public readonly taskId?: string
   ) {
     super(label, collapsibleState);
 
@@ -124,72 +127,75 @@ export class SprintsTreeDataProvider implements vscode.TreeDataProvider<SprintsT
   }
 
   private async handleTaskDropFromTasks(target: SprintsTreeItem, handleData: any): Promise<void> {
-    let taskFilePath: string | undefined;
-    let taskName: string | undefined;
-
-    // If legacy itemHandles exists, extract basename using split(' ')[1]
-    if (handleData.itemHandles && Array.isArray(handleData.itemHandles) && handleData.itemHandles.length > 0) {
-      const raw = String(handleData.itemHandles[0] || '');
-      const parts = raw.split(' ');
-      taskName = parts[1] || parts.pop() || raw;
+    const taskId = handleData._id;
+    if (!taskId) {
+      throw new Error('No task ID found in drop data');
     }
-    const taskPath = getTaskPath(taskName || path.basename(taskFilePath || ''));
 
-    await this.addTaskToSprint(target.filePath!, taskPath);
+    if (!target.sprintId) {
+      throw new Error('No sprint ID found in drop target');
+    }
+
+    await sprintService.addTaskToSprintById(target.sprintId, taskId);
     this.refresh();
   }
   private async handleTaskDropFromBacklogs(target: SprintsTreeItem, handleData: any): Promise<void> {
-    let taskFilePath: string | undefined;
-    let taskName: string | undefined;
-
-    // If legacy itemHandles exists, extract basename using split(' ')[1]
-    if (handleData.itemHandles && Array.isArray(handleData.itemHandles) && handleData.itemHandles.length > 0) {
-      const raw = String(handleData.itemHandles[0] || '');
-      const parts = raw.split(' ');
-      taskName = parts[1] || parts.pop() || raw;
+    const taskId = handleData._id;
+    if (!taskId) {
+      throw new Error('No task ID found in drop data');
     }
-    const taskPath = getTaskPath(taskName || path.basename(taskFilePath || ''));
 
-    await this.addTaskToSprint(target.filePath!, taskPath);
+    if (!target.sprintId) {
+      throw new Error('No sprint ID found in drop target');
+    }
 
+    await sprintService.addTaskToSprintById(target.sprintId, taskId);
     this.refresh();
   }
   private async handleTaskDropFromEpics(target: SprintsTreeItem, handleData: any): Promise<void> {
-    let taskFilePath: string | undefined;
-    let taskName: string | undefined;
-
-    // If legacy itemHandles exists, extract basename using split(' ')[1]
-    if (handleData.itemHandles && Array.isArray(handleData.itemHandles) && handleData.itemHandles.length > 0) {
-      const raw = String(handleData.itemHandles[0] || '');
-      const parts = raw.split(' ');
-      taskName = parts[1] || parts.pop() || raw;
+    const taskId = handleData._id;
+    if (!taskId) {
+      throw new Error('No task ID found in drop data');
     }
-    const taskPath = getTaskPath(taskName || path.basename(taskFilePath || ''));
 
-    await this.addTaskToSprint(target.filePath!, taskPath);
+    if (!target.sprintId) {
+      throw new Error('No sprint ID found in drop target');
+    }
+
+    await sprintService.addTaskToSprintById(target.sprintId, taskId);
     this.refresh();
   }
   private async handleTaskDropFromSprints(target: SprintsTreeItem, handleData: any): Promise<void> {
-    const { taskName, sprint } = handleData;
+    const taskId = handleData._id;
+    if (!taskId) {
+      throw new Error('No task ID found in drop data');
+    }
 
-    const taskPath = getTaskPath(taskName);
-    const backlogPath = getSprintPath(sprint.sprintName);
+    if (!target.sprintId) {
+      throw new Error('No sprint ID found in drop target');
+    }
 
-    await this.addTaskToSprint(target.filePath!, taskPath);
-    await this.refresh();
-  }
-  private async addTaskToSprint(sprintPath: string, taskPath: string): Promise<void> {
-
-    await sprintController.addTaskToSprint(sprintPath, taskPath);
+    const sourceSprintId = handleData.sprint?.sprintId || null;
+    
+    if (sourceSprintId) {
+      sprintService.removeTaskFromSprintById(sourceSprintId, taskId);
+    }
+    
+    await sprintService.addTaskToSprintById(target.sprintId, taskId);
     this.refresh();
-    void vscode.window.showInformationMessage(`Task added to sprint`);
-
+  }
+private async addTaskToSprint(sprintPath: string, taskPath: string): Promise<void> {
+    sprintService.addTaskToSprint(sprintPath, taskPath);
   }
   private async removeTaskFromSprint(sprintPath: string, taskPath: string): Promise<void> {
-    await sprintController.removeTaskFromSprint(sprintPath, taskPath);
+    sprintService.removeTaskFromSprint(sprintPath, taskPath);
   }
   private async getTasksFromSprintName(sprintName: string): Promise<SprintsTreeItem[]> {
     const treeItemsRaw = sprintService.getTasksFromSprint(sprintName);
+    const sprints = sprintService.getSprints('');
+    const sprint = sprints.find(s => s.name === sprintName);
+    const sprintId = sprint?.id;
+    
     return (treeItemsRaw || []).map((item: any) => {
       const treeItem = new SprintsTreeItem(
         item.label,
@@ -197,12 +203,34 @@ export class SprintsTreeDataProvider implements vscode.TreeDataProvider<SprintsT
         [],
         undefined,
         item.path,
-        sprintName
+        undefined,
+        sprintId,
+        item.id
       );
       if (item.command) {
         treeItem.command = item.command;
       }
-      treeItem.tooltip = `Task: ${item.title || item.name || item.label}\nPath: ${item.path}\nSprint: ${sprintName}`;
+      treeItem.tooltip = `Task: ${item.title || item.name || item.label}\nPath: ${item.path}`;
+      return treeItem;
+    });
+  }
+  private async getTasksFromSprintId(sprintId: string): Promise<SprintsTreeItem[]> {
+    const treeItemsRaw = sprintService.getTasksFromSprintById(sprintId);
+    return (treeItemsRaw || []).map((item: any) => {
+      const treeItem = new SprintsTreeItem(
+        item.label,
+        item.collapsibleState || vscode.TreeItemCollapsibleState.None,
+        [],
+        undefined,
+        item.path,
+        undefined,
+        sprintId,
+        item.id
+      );
+      if (item.command) {
+        treeItem.command = item.command;
+      }
+      treeItem.tooltip = `Task: ${item.title || item.name || item.label}\nPath: ${item.path}`;
       return treeItem;
     });
   }
@@ -211,19 +239,15 @@ export class SprintsTreeDataProvider implements vscode.TreeDataProvider<SprintsT
     try {
       if (source.length > 0) {
         const taskItem = source[0];
-        if (!taskItem.taskPath) {
-          throw new Error('No task path found for drag operation');
-        }
 
-        // Create a consistent task data object
         const taskData = {
+          _id: taskItem.taskId,
           type: 'task',
           label: taskItem.label,
-          taskName: removeEmojiFromTaskLabel(taskItem.label),
           path: taskItem.taskPath,
           sprint: {
             type: 'sprint',
-            sprintName: taskItem.sourceSprintPath || taskItem.filePath
+            sprintId: taskItem.sprintId
           }
         };
 
@@ -231,50 +255,88 @@ export class SprintsTreeDataProvider implements vscode.TreeDataProvider<SprintsT
           new vscode.DataTransferItem(JSON.stringify(taskData))
         );
 
-        void vscode.window.showInformationMessage(`Dragging task: ${taskItem.label}`);
+        dataTransfer.set('text/plain',
+          new vscode.DataTransferItem(JSON.stringify(taskData))
+        );
       }
     } catch (error) {
       void vscode.window.showErrorMessage('Failed to start drag: ' + (error as Error).message);
     }
   }
+
   async handleDrop(target: SprintsTreeItem | undefined, dataTransfer: vscode.DataTransfer): Promise<void> {
     try {
       if (!target?.filePath || target.contextValue !== 'sprint') {
         throw new Error('Invalid drop target: must be a sprint');
       }
 
+      // Try sprint MIME type first (dragging from another sprint)
+      const sprintMimeType = 'application/vnd.code.tree.sprintdesk-sprints';
+      const sprintItem = dataTransfer.get(sprintMimeType);
+      if (sprintItem && sprintItem.value) {
+        const handleData = JSON.parse(sprintItem.value as string);
+        if (handleData._id) {
+          await this.handleTaskDropFromSprints(target, handleData);
+          return;
+        }
+      }
+
+      // Try text/plain
+      const textItem = dataTransfer.get('text/plain');
+      if (textItem && textItem.value) {
+        try {
+          const handleData = JSON.parse(textItem.value as string);
+          if (handleData._id && handleData.sprint?.sprintId) {
+            await this.handleTaskDropFromSprints(target, handleData);
+            return;
+          } else if (handleData._id) {
+            await this.handleTaskDropFromTasks(target, handleData);
+            return;
+          }
+        } catch (e) {
+        }
+      }
+
+      // Fallback: try other sources
       const taskSources = {
         tasks: 'application/vnd.code.tree.sprintdesk-tasks',
         backlogs: 'application/vnd.code.tree.sprintdesk-backlogs',
-        epics: 'application/vnd.code.tree.sprintdesk-epics',
-        sprints: 'application/vnd.code.tree.sprintdesk-sprints'
+        epics: 'application/vnd.code.tree.sprintdesk-epics'
       };
 
       for (const [source, mimeType] of Object.entries(taskSources)) {
         const dataItem = dataTransfer.get(mimeType);
-        if (dataItem) {
+        if (dataItem && dataItem.value) {
           const handleData = JSON.parse(dataItem.value as string);
-          switch (source) {
-            case 'tasks':
-              await this.handleTaskDropFromTasks(target, handleData);
-              break;
-            case 'backlogs':
-              await this.handleTaskDropFromBacklogs(target, handleData);
-              break;
-            case 'epics':
-              await this.handleTaskDropFromEpics(target, handleData);
-              break;
-            case 'sprints':
-              await this.handleTaskDropFromSprints(target, handleData);
-              break;
+          
+          let taskId = handleData._id;
+          if (!taskId && handleData.itemHandles && Array.isArray(handleData.itemHandles) && handleData.itemHandles.length > 0) {
+            const raw = String(handleData.itemHandles[0] || '');
+            const parts = raw.split(':');
+            const taskName = parts[parts.length - 1]?.trim();
+            if (taskName) {
+              taskId = taskName.replace('.md', '').replace(' ⏳', '');
+            }
           }
-          return;
+          
+          if (taskId) {
+            switch (source) {
+              case 'tasks':
+                await this.handleTaskDropFromTasks(target, { _id: taskId });
+                return;
+              case 'backlogs':
+                await this.handleTaskDropFromBacklogs(target, { _id: taskId });
+                return;
+              case 'epics':
+                await this.handleTaskDropFromEpics(target, { _id: taskId });
+                return;
+            }
+          }
         }
       }
 
       throw new Error('No valid task data found in drop');
     } catch (error: unknown) {
-      console.error('Drop error:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
       void vscode.window.showErrorMessage(`Failed to move task: ${errorMessage}`);
     }
@@ -294,14 +356,23 @@ export class SprintsTreeDataProvider implements vscode.TreeDataProvider<SprintsT
 
     return dateRange;
   }
-  private async getSprintsTree(workspaceRoot: string): Promise<SprintsTreeItem[]> {
-    const sprintsDir = path.join(workspaceRoot, PROJECT_CONSTANTS.SPRINTDESK_DIR, PROJECT_CONSTANTS.SPRINTS_DIR);
-    const files = fileService.listMdFiles(sprintsDir);
+private async getSprintsTree(workspaceRoot: string): Promise<SprintsTreeItem[]> {
+    const dataService = getDataService(workspaceRoot);
+    const sprints = dataService.loadSprints();
 
-    const items = files.map(name => {
-      const filePath = path.join(sprintsDir, name);
-      const label = this.humanizeSprintName(name);
-      return new SprintsTreeItem(label, vscode.TreeItemCollapsibleState.Collapsed, [], filePath);
+    const items = sprints.map(sprint => {
+      const filePath = sprint.path || '';
+      const label = sprint.name || sprint.title || '';
+
+      return new SprintsTreeItem(
+        label, 
+        vscode.TreeItemCollapsibleState.Collapsed, 
+        [], 
+        filePath, 
+        undefined, 
+        undefined,
+        sprint.id
+      );
     });
 
     items.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' }));
@@ -320,6 +391,9 @@ export class SprintsTreeDataProvider implements vscode.TreeDataProvider<SprintsT
     }
 
     if (element.filePath) {
+      if (element.sprintId) {
+        return this.getTasksFromSprintId(element.sprintId);
+      }
       return this.getTasksFromSprintName(path.basename(element.filePath));
     }
 

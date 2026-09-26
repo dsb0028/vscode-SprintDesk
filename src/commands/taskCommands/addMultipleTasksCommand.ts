@@ -5,6 +5,7 @@ import * as epicService from '../../services/epicService';
 import * as taskService from '../../services/taskService';
 import { parseTaskMetadataFromFilename } from '../../utils/taskTemplate';
 import { PROJECT_CONSTANTS, UI_CONSTANTS } from '../../utils/constant';
+import * as path from 'path';
 
 export function addMultipleTasksCommand(context: vscode.ExtensionContext) {
   const command = vscode.commands.registerCommand(
@@ -69,41 +70,34 @@ export function addMultipleTasksCommand(context: vscode.ExtensionContext) {
             const createdTasks: string[] = [];
             const skippedTasks: string[] = [];
 
-            // Step 1: Create task files
+            // Step 1: Create tasks via TaskService
             for (const rawTask of tasks) {
-              const task = rawTask.trim();
-              if (!task) continue;
+              const taskLine = rawTask.trim();
+              if (!taskLine) continue;
 
-              const safeTaskName = task.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_");
-              const fileName = safeTaskName.endsWith(".md") ? safeTaskName : `${safeTaskName}.md`;
-              const fileUri = vscode.Uri.joinPath(tasksDir, fileName);
+              const safeTaskName = taskLine.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_");
+              const fileNameHint = safeTaskName.endsWith(".md") ? safeTaskName : `${safeTaskName}.md`;
 
-              // Check if task already exists
+              const { taskName, epicName } = parseTaskMetadataFromFilename(fileNameHint);
+
               try {
-                await vscode.workspace.fs.stat(fileUri);
-                skippedTasks.push(fileName);
-                continue;
-              } catch {
-                // Doesn't exist → create
-              }
+                // create the task using the task service
+                const created = await taskService.createTask(workspaceRoot.fsPath, {
+                  title: taskName,
+                  epic: epicName || null
+                });
 
-              // Create file using new data approach: generated _id and name (slug), others left empty
-              try {
-                const { taskName, epicName } = parseTaskMetadataFromFilename(fileName);
-                const slug = taskName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9\-_]/g, '').toLowerCase();
-                const generatedId = `tsk_${slug}`;
-                const frontmatter = `---\n_id: ${generatedId}\nname: ${slug}\n---\n\n# 🧩 Task: ${taskName}\n`;
-                await vscode.workspace.fs.writeFile(fileUri, new TextEncoder().encode(frontmatter));
-                createdTasks.push(fileName);
+                // derive filename from returned task.path if available
+                const createdFileName = created.path ? path.basename(created.path) : fileNameHint;
+                createdTasks.push(createdFileName);
 
-                // Group by Epic
                 if (epicName) {
                   if (!epicTasks[epicName]) epicTasks[epicName] = [];
-                  epicTasks[epicName].push(fileName);
+                  epicTasks[epicName].push(createdFileName);
                 }
               } catch (error) {
-                console.error('Error processing task:', error);
-                skippedTasks.push(fileName);
+                console.error('Error creating task via service:', error);
+                skippedTasks.push(fileNameHint);
               }
             }
 
@@ -133,11 +127,16 @@ export function addMultipleTasksCommand(context: vscode.ExtensionContext) {
 ${taskLinks}
 `;
 
-              // Write file (overwrite if exists) via EpicService
-              const epicFsPath = epicFileUri.fsPath;
-              epicService.createEpic(epic);
-              epicService.updateEpic(epicFsPath, content);
-              updatedEpics.push(epicFileName);
+              // Ensure epic exists and add tasks via service
+              try {
+                epicService.createEpic(epic);
+                for (const taskFile of taskFiles) {
+                  epicService.addTaskToEpic(epic, taskFile);
+                }
+                updatedEpics.push(epicFileName);
+              } catch (err) {
+                console.error('Failed updating epic:', err);
+              }
             }
 
             // Show result

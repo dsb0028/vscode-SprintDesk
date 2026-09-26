@@ -1,15 +1,11 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
 import * as taskService from '../../services/taskService';
 import * as epicService from '../../services/epicService';
 import * as backlogService from '../../services/backlogService';
 import insertTaskLinkUnderSection from '../../utils/mdUtils';
-import { TASK_CONSTANTS } from '../../utils/constant';
-import * as taskController from '../../controller/taskController';
 
 export function registerAddQuicklyCommand(context: vscode.ExtensionContext) {
   const disposable = vscode.commands.registerCommand('sprintdesk.addQuickly', async () => {
-
     const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!ws) {
       vscode.window.showErrorMessage('No workspace folder open.');
@@ -24,7 +20,6 @@ export function registerAddQuicklyCommand(context: vscode.ExtensionContext) {
       return;
     }
 
-    // Parse input
     const taskMatch = input.match(/@task ([^@]+)/);
     const epicMatch = input.match(/@epic ([^@]+)/);
     const backlogMatch = input.match(/@backlog ([^@]+)/);
@@ -37,15 +32,6 @@ export function registerAddQuicklyCommand(context: vscode.ExtensionContext) {
       return;
     }
 
-    // Get workspace root
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders || workspaceFolders.length === 0) {
-      vscode.window.showErrorMessage('No workspace folder open.');
-      return;
-    }
-    const root = workspaceFolders[0].uri.fsPath;
-
-    // Create task via TaskService (creates folders/files as needed)
     let taskPath: string | undefined;
     try {
       const res = await taskService.createTask(ws, {
@@ -60,27 +46,29 @@ export function registerAddQuicklyCommand(context: vscode.ExtensionContext) {
       return;
     }
 
-    // Link to epic using EpicService
     if (epicTitle) {
       try {
-        await epicService.addTaskToEpic(epicTitle, taskPath as string);
+        epicService.addTaskToEpic(epicTitle, taskTitle);
       } catch (e) {
-        // fallback: ensure epic file exists
-        epicService.createEpic(epicTitle);
+        const category = await vscode.window.showInputBox({
+          prompt: 'Epic category (e.g., SEO, FE, BE)',
+          placeHolder: 'MISC'
+        }) || 'MISC';
+        epicService.createEpic(epicTitle, category);
       }
     }
 
-    // Add to backlog if specified
-    if (backlogName) {
-      const backlogs = backlogService.listBacklogs(root);
-      const match = backlogs.find(b => path.basename(b).toLowerCase().includes(backlogName.toLowerCase()));
+    if (backlogName && taskPath) {
+      const backlogs = backlogService.listBacklogs(ws);
+      const match = backlogs.find(b => b.title.toLowerCase().includes(backlogName.toLowerCase()));
       if (!match) {
-        vscode.window.showErrorMessage(`No backlog file found matching '${backlogName}'.`);
+        vscode.window.showWarningMessage(`No backlog found matching '${backlogName}'. Task was created but not linked.`);
       } else {
-        const backlogContent = backlogService.readBacklog(match);
-        const taskLink = `- [${taskTitle.replace(/\s+/g, '-').toLowerCase()}](../Tasks/${taskPath})`;
-        const newContent = insertTaskLinkUnderSection(backlogContent, 'tasks', taskLink);
-        backlogService.updateBacklog(match, newContent);
+        const tasks = taskService.loadTasks();
+        const task = tasks.find(t => t.title === taskTitle);
+        if (task) {
+          backlogService.addTaskToBacklog(match.id, task.id);
+        }
       }
     }
 

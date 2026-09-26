@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { startFeatureFromTask as defaultStart } from '../../services/sprintService';
+import { startFeatureFromTask as defaultStart } from '../interactive/sprintInteractive';
 
 export function registerStartFeatureFromTaskCommand(context: vscode.ExtensionContext, deps?: { startFeatureFromTask?: (item: any) => Promise<void> }) {
   context.subscriptions.push(

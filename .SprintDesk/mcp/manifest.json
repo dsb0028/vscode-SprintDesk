@@ -1,0 +1,78 @@
+{
+  "name": "sprintdesk-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for SprintDesk task management - exposes CRUD and query operations for AI agents",
+  "author": "SprintDesk",
+  "repository": "https://github.com/khmmamed/vscode-SprintDesk",
+  "homepage": "https://github.com/khmmamed/vscode-SprintDesk",
+  "capabilities": {
+    "tools": true,
+    "resources": false
+  },
+  "connection": {
+    "http": {
+      "url": "http://localhost:3847/mcp",
+      "methods": [
+        "POST"
+      ]
+    },
+    "stdio": {
+      "command": "npm run mcp",
+      "cwd": "<workspace-root>"
+    }
+  },
+  "tools": {
+    "task": [
+      "sprintdesk_createTask",
+      "sprintdesk_getTask",
+      "sprintdesk_updateTask",
+      "sprintdesk_deleteTask",
+      "sprintdesk_listTasks",
+      "sprintdesk_searchTasks"
+    ],
+    "epic": [
+      "sprintdesk_createEpic",
+      "sprintdesk_getEpic",
+      "sprintdesk_updateEpic",
+      "sprintdesk_deleteEpic",
+      "sprintdesk_listEpics",
+      "sprintdesk_getTasksByEpic",
+      "sprintdesk_addTaskToEpic"
+    ],
+    "sprint": [
+      "sprintdesk_createSprint",
+      "sprintdesk_getSprint",
+      "sprintdesk_updateSprint",
+      "sprintdesk_deleteSprint",
+      "sprintdesk_listSprints",
+      "sprintdesk_getTasksBySprint",
+      "sprintdesk_addTaskToSprint"
+    ],
+    "backlog": [
+      "sprintdesk_createBacklog",
+      "sprintdesk_getBacklog",
+      "sprintdesk_listBacklogs",
+      "sprintdesk_addTaskToBacklog"
+    ],
+    "team": [
+      "sprintdesk_listTeam",
+      "sprintdesk_syncTeamFromGit",
+      "sprintdesk_addTeamMember",
+      "sprintdesk_removeTeamMember"
+    ],
+    "history": [
+      "sprintdesk_getHistory",
+      "sprintdesk_trackChange"
+    ],
+    "move": [
+      "sprintdesk_moveTaskToEpic",
+      "sprintdesk_moveTaskToSprint",
+      "sprintdesk_moveTaskToBacklog"
+    ]
+  },
+  "usage": {
+    "http_curl": "curl -X POST http://localhost:3847/mcp -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{}}'",
+    "http_call": "curl -X POST http://localhost:3847/mcp -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"sprintdesk_listTasks\",\"arguments\":{}}}'",
+    "stdio": "cd <workspace> && npm run mcp"
+  }
+}

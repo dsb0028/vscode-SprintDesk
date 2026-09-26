@@ -54,12 +54,13 @@ ${metadata.epic?.title ? `📘 Epic: \`${metadata.epic.title}\`` : ''}
 | 🧩 **Category** | ${metadata.category || 'Uncategorized'} |
 | ⚙️ **Component** | ${metadata.component || 'General'} |
 | ⏱️ **Duration** | ${metadata.duration || '0d'} |
-| 🚦 **Priority** | ${metadata.priority || UI_CONSTANTS.EMOJI.PRIORITY.MEDIUM} |
+| 🚦 **Priority** | ${metadata.priority || '🟡 Medium'} |
 | 📊 **Status** | ${metadata.status || '⏳ Not Started'} |
 | 👤 **Assignee** | ${metadata.assignee || 'Unassigned'} |
 | 🕓 **Created At** | ${now} |
 | 🔄 **Updated At** | ${now} |
 | 🎯 **Objective** | ${metadata.objective || 'Add task objective here...'} |
+${metadata.epic?.title ? `| 📘 **Epic** | ${metadata.epic.title} |` : ''}
 
 
 ## 🧱 Description
@@ -76,26 +77,20 @@ Add task description here...
 ## 🧠 Notes
 > Add implementation notes here...
 ${metadata.epic?.title ? `
-## Epic
-- [${metadata.epic.title}](../${PROJECT_CONSTANTS.EPICS_DIR}/${generateEpicName(metadata.epic.title)})
+## 🚩 Epic
+- [${metadata.epic.title}](${metadata.epic.path || '../' + PROJECT_CONSTANTS.EPICS_DIR + '/' + generateEpicName(metadata.epic.title)})
 ` : ''}
 
-## Sprints
+## ⏱️ Sprints
 > Sprints will be linked here automatically
 
-## Backlogs
+## 📋 Backlogs
 > Backlogs will be linked here automatically
 
-## Related Tasks
+## 🔗 Related Tasks
 > Related tasks will be linked here automatically
- `};
-export function generateTaskTemplate(metadata: SprintDesk.TaskMetadata): string {
-
-  return `${generateTaskMetadata(metadata)}
-
-${generateTaskContent(metadata)}
-`;
-}
+ `;
+};
 // Update epic line after task header
 export const updateEpicHeaderLine = (ls: string[], epicMeta: SprintDesk.EpicMetadata): string[] => {
   const taskHeaderIdx = ls.findIndex(l => l.trim().startsWith('# 🧩 Task'));
@@ -110,6 +105,7 @@ export const updateEpicHeaderLine = (ls: string[], epicMeta: SprintDesk.EpicMeta
         : line
   ).flat();
 };
+
 // Update epic section
 export const updateEpicSection = (
   ls: string[], 
@@ -134,9 +130,14 @@ export const updateEpicSection = (
   return [...before, sectionHeader, tableHeader, tableRows];
 };
 
+// Generate complete task template (metadata + content)
+export function generateTaskTemplate(metadata: SprintDesk.TaskMetadata): string {
+  return generateTaskMetadata(metadata) + '\n\n' + generateTaskContent(metadata);
+}
+
 /* 
  * Old code for reference:
-*/
+ */
 export function parseTaskMetadataFromFilename(filename: string): { taskName: string; epicName?: string } {
   const taskPrefix = PROJECT_CONSTANTS.FILE_PREFIX.TASK.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const epicPrefix = PROJECT_CONSTANTS.FILE_PREFIX.EPIC.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

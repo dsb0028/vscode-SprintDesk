@@ -21,8 +21,10 @@ export class RepositoriesTreeItem extends vscode.TreeItem {
     this.tooltip = `${fullPath}`;
 
     if (nodeType === 'repo') {
+      // Add context menu for repository nodes
       this.contextValue = 'repository';
       this.iconPath = new vscode.ThemeIcon('folder');
+      this.tooltip = `Right-click for options: ${fullPath}`;
     } else if (nodeType === 'category') {
       this.contextValue = `repoCategory`;
       this.iconPath = new vscode.ThemeIcon('root-folder');
