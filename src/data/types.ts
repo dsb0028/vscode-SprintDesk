@@ -10,6 +10,8 @@ export interface Task {
   epic: string | null;
   backlog: string;
   sprint: string | null;
+  startDate?: string;
+  endDate?: string;
   assignee?: string;
   createdAt: string;
   updatedAt: string;

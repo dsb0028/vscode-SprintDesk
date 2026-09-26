@@ -2,10 +2,16 @@ import { Sprint, Task } from '../data/types';
 
 export interface CalendarTask {
   id: string;
+  code: string;
   title: string;
   status: Task['status'];
   priority: Task['priority'];
   path?: string;
+}
+
+export interface ScheduledTask extends CalendarTask {
+  startDate: string;
+  endDate: string;
 }
 
 export interface CalendarSprint {
@@ -20,9 +26,14 @@ export interface SprintCalendar {
   startDate: string | null;
   endDate: string | null;
   sprints: CalendarSprint[];
+  tasks: ScheduledTask[];
+  warnings: string[];
 }
 
-function toIsoDate(value: string): string | null {
+function toIsoDate(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
   const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   const dmyMatch = value.match(/^(\d{2})-(\d{2})-(\d{4})$/);
   const match = isoMatch ?? dmyMatch;
@@ -49,6 +60,7 @@ function toIsoDate(value: string): string | null {
 function toCalendarTask(task: Task): CalendarTask {
   return {
     id: task.id,
+    code: task.code,
     title: task.title,
     status: task.status,
     priority: task.priority,
@@ -59,6 +71,25 @@ function toCalendarTask(task: Task): CalendarTask {
 export function buildSprintCalendar(sprints: Sprint[], tasks: Task[]): SprintCalendar {
   const tasksById = new Map(tasks.map((task) => [task.id, task]));
   const calendarSprints: CalendarSprint[] = [];
+  const scheduledTasks: ScheduledTask[] = [];
+  const warnings: string[] = [];
+
+  for (const task of tasksById.values()) {
+    if (!task.startDate && !task.endDate) {
+      continue;
+    }
+    const startDate = toIsoDate(task.startDate);
+    const endDate = toIsoDate(task.endDate);
+    if (!startDate || !endDate || startDate > endDate) {
+      warnings.push(`${task.code}: provide valid startDate and endDate, with endDate on or after startDate.`);
+      continue;
+    }
+    scheduledTasks.push({ ...toCalendarTask(task), startDate, endDate });
+  }
+  scheduledTasks.sort((left, right) => (
+    left.startDate.localeCompare(right.startDate)
+    || left.code.localeCompare(right.code)
+  ));
 
   for (const sprint of sprints) {
     const parsedStartDate = toIsoDate(sprint.startDate);
@@ -88,7 +119,12 @@ export function buildSprintCalendar(sprints: Sprint[], tasks: Task[]): SprintCal
     left.startDate.localeCompare(right.startDate)
     || left.title.localeCompare(right.title)
   ));
-  const endDate = calendarSprints.reduce<string | null>(
+  const ranges = [...calendarSprints, ...scheduledTasks];
+  const startDate = ranges.reduce<string | null>(
+    (earliest, range) => !earliest || range.startDate < earliest ? range.startDate : earliest,
+    null,
+  );
+  const endDate = ranges.reduce<string | null>(
     (latestEndDate, sprint) => (
       !latestEndDate || sprint.endDate > latestEndDate
         ? sprint.endDate
@@ -98,8 +134,10 @@ export function buildSprintCalendar(sprints: Sprint[], tasks: Task[]): SprintCal
   );
 
   return {
-    startDate: calendarSprints.at(0)?.startDate ?? null,
+    startDate,
     endDate,
     sprints: calendarSprints,
+    tasks: scheduledTasks,
+    warnings,
   };
 }

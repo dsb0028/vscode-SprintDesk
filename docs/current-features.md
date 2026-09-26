@@ -19,7 +19,8 @@
 
 ### 🔄 Sprint Management
 - Sprint creation and planning
-- Read-only sprint calendar visualization with inclusive sprint ranges and assigned task lists
+- Read-only sprint calendar with inclusive sprint ranges, dated task cards, multi-day task bars, and assigned task lists
+- Explicit task scheduling via `startDate` and `endDate` in the YAML task data; undated tasks stay off the grid (see [Task Calendar](../README.md#task-calendar))
 - Add existing tasks to sprints
 - Sprint progress tracking
 - Sprint file management
