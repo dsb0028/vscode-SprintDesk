@@ -200,7 +200,7 @@ export class TasksTreeDataProvider implements vscode.TreeDataProvider<TaskTreeEl
   public handleDrop(): void { }
 
   public handleDrag(source: readonly TaskTreeElement[], dataTransfer: vscode.DataTransfer): void {
-    const taskItem = source.find(item => item instanceof TaskTreeItem);
+    const taskItem = source.find((item): item is TaskTreeItem => item instanceof TaskTreeItem);
     if (!taskItem) return;
 
     const taskData = taskItem.taskData;
