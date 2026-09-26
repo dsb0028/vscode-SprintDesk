@@ -4,6 +4,7 @@ import * as backlogService from '../../services/backlogService';
 import { getStores } from '../../data/stores';
 import {
   Handler,
+  HandlerContext,
   HandlerResult,
   res,
   getWs,
@@ -343,38 +344,65 @@ async function handle_sprintdesk_moveTaskToBacklog(args: any): Promise<HandlerRe
   return res(`Task ${task.code} moved to backlog ${backlog.name}`);
 }
 
-async function handle_sprintdesk_projectContext(_args: any): Promise<HandlerResult> {
-  const ds = getDs();
-  if (!ds) return res('No workspace found', true);
-
+function getProjectContext(ds: NonNullable<ReturnType<typeof getDs>>, refreshedAt?: string) {
   const tasks = ds.loadTasks();
+  const epics = ds.loadEpics();
+  const sprints = ds.loadSprints();
+  const backlogs = ds.loadBacklogs();
   const taskStatusCounts: Record<string, number> = {};
   tasks.forEach(t => {
     taskStatusCounts[t.status] = (taskStatusCounts[t.status] || 0) + 1;
   });
 
-  const stores = getStores();
+  const stores = getStores(ds.getWorkspaceRoot());
   const config = ds.loadConfig();
 
-  const context = {
-    workspace: getWs(),
+  return {
+    workspace: ds.getWorkspaceRoot(),
     projectPrefix: config.projectPrefix,
     counts: {
       tasks: tasks.length,
-      epics: ds.loadEpics().length,
-      sprints: ds.loadSprints().length,
-      backlogs: ds.loadBacklogs().length,
+      epics: epics.length,
+      sprints: sprints.length,
+      backlogs: backlogs.length,
       runs: stores.runs.count(),
       events: stores.events.count(),
       employees: stores.employees.count()
     },
     tasksByStatus: taskStatusCounts,
+    backlogTaskCounts: backlogs.map(backlog => ({
+      id: backlog.id,
+      title: backlog.title,
+      taskCount: tasks.filter(task => backlog.tasks.includes(task.id)).length
+    })),
     activeRuns: stores.runs.findByStatus('running').length,
     latestEvents: stores.events.latest(10).map(e => ({ id: e.id, type: e.type, source: e.source, timestamp: e.timestamp })),
-    hasOpenTasks: tasks.some(t => t.status === 'in-progress')
+    hasOpenTasks: tasks.some(t => t.status === 'in-progress'),
+    ...(refreshedAt ? { refreshedAt } : {})
   };
+}
 
-  return res(JSON.stringify(context, null, 2));
+async function handle_sprintdesk_projectContext(_args: any): Promise<HandlerResult> {
+  const ds = getDs();
+  if (!ds) return res('No workspace found', true);
+
+  return res(JSON.stringify(getProjectContext(ds), null, 2));
+}
+
+async function handle_sprintdesk_refresh(
+  _args: any,
+  context: HandlerContext,
+): Promise<HandlerResult> {
+  const ds = getDs();
+  if (!ds) return res('No workspace found', true);
+
+  ds.refresh();
+  const snapshot = getProjectContext(ds, new Date().toISOString());
+  if (context.refreshUi) {
+    await context.refreshUi();
+  }
+
+  return res(JSON.stringify(snapshot, null, 2));
 }
 
 export const PLANNING_HANDLERS: Record<string, Handler> = {
@@ -399,5 +427,6 @@ export const PLANNING_HANDLERS: Record<string, Handler> = {
   sprintdesk_moveTaskToEpic: handle_sprintdesk_moveTaskToEpic,
   sprintdesk_moveTaskToSprint: handle_sprintdesk_moveTaskToSprint,
   sprintdesk_moveTaskToBacklog: handle_sprintdesk_moveTaskToBacklog,
+  sprintdesk_refresh: handle_sprintdesk_refresh,
   sprintdesk_projectContext: handle_sprintdesk_projectContext,
 };

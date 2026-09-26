@@ -490,6 +490,14 @@ export const AUDIT_TOOLS = [
 
 export const CONTEXT_TOOLS = [
   {
+    name: 'sprintdesk_refresh',
+    description: 'Reload SprintDesk project data and return updated counts. HTTP calls refresh open VS Code SprintDesk views; stdio calls return data only.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+    },
+  },
+  {
     name: 'sprintdesk_projectContext',
     description: 'Get a compact snapshot of the project: counts, statuses, active runs, recent events',
     inputSchema: {

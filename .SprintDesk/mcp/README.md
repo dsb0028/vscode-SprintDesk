@@ -91,6 +91,12 @@ curl http://localhost:3847/health
 | `sprintdesk_moveTaskToSprint` | Move task to sprint |
 | `sprintdesk_moveTaskToBacklog` | Move task to backlog |
 
+### Context Tools
+| Tool | Description |
+|------|-------------|
+| `sprintdesk_refresh` | Reload project data and return updated counts. HTTP calls also refresh open VS Code SprintDesk views; stdio calls return data only. |
+| `sprintdesk_projectContext` | Get the current project snapshot. |
+
 ### Team Tools
 | Tool | Description |
 |------|-------------|

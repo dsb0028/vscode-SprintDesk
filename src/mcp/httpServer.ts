@@ -7,6 +7,7 @@ import { ALL_TOOLS } from './tools';
 export interface McpHttpTransportOptions {
   port?: number;
   onListen?: (port: number, server: http.Server) => void;
+  refreshUi?: () => Promise<void>;
 }
 
 export function createMcpHttpTransport(options: McpHttpTransportOptions = {}): http.Server {
@@ -54,7 +55,9 @@ export function createMcpHttpTransport(options: McpHttpTransportOptions = {}): h
       req.on('end', async () => {
         try {
           const request = JSON.parse(body);
-          const response = await handleRequest(request);
+          const response = await handleRequest(request, {
+            refreshUi: options.refreshUi,
+          });
           if (response.result || response.error) {
             sendJson(res, 200, response);
           } else {

@@ -64,6 +64,10 @@
       "sprintdesk_getHistory",
       "sprintdesk_trackChange"
     ],
+    "context": [
+      "sprintdesk_refresh",
+      "sprintdesk_projectContext"
+    ],
     "move": [
       "sprintdesk_moveTaskToEpic",
       "sprintdesk_moveTaskToSprint",

@@ -356,6 +356,9 @@ vscode.commands.registerCommand('sprintdesk.runAgent', async (item: any) => {
   const startMcpServer = () => {
     if (mcpServer) return;
     mcpServer = createMcpHttpTransport({
+      refreshUi: async () => {
+        await vscode.commands.executeCommand('sprintdesk.refresh');
+      },
       onListen: (port: number) => {
         console.log(`🚀 MCP server running on port ${port}`);
         vscode.window.showInformationMessage(`🚀 MCP server running on port ${port}`);
@@ -501,7 +504,7 @@ vscode.commands.registerCommand('sprintdesk.runAgent', async (item: any) => {
         run: ['sprintdesk_runsCreate', 'sprintdesk_runsList', 'sprintdesk_runsGet'],
         event: ['sprintdesk_eventsPublish', 'sprintdesk_eventsList'],
         audit: ['sprintdesk_auditList'],
-        context: ['sprintdesk_projectContext'],
+        context: ['sprintdesk_refresh', 'sprintdesk_projectContext'],
         history: ['sprintdesk_getHistory', 'sprintdesk_trackChange']
       },
       usage: {
@@ -551,7 +554,7 @@ Local MCP server for integrating SprintDesk with AI agents like Copilot, Claude,
 - sprintdesk_eventsPublish, sprintdesk_eventsList, sprintdesk_auditList
 
 ### Context Tools
-- sprintdesk_projectContext
+- sprintdesk_refresh, sprintdesk_projectContext
 
 ## Usage
 

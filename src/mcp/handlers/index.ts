@@ -5,7 +5,7 @@ import { EVENT_HANDLERS } from './events';
 import { HISTORY_HANDLERS } from './history';
 import { AUDIT_HANDLERS } from './audit';
 import { PLANNING_HANDLERS } from './planning';
-import { Handler, HandlerResult, res } from './helpers';
+import { Handler, HandlerContext, HandlerResult, res } from './helpers';
 
 export const HANDLERS: Record<string, Handler> = {
   ...TASK_HANDLERS,
@@ -17,10 +17,14 @@ export const HANDLERS: Record<string, Handler> = {
   ...PLANNING_HANDLERS
 };
 
-export async function handleToolCall(toolName: string, args: any): Promise<HandlerResult> {
+export async function handleToolCall(
+  toolName: string,
+  args: any,
+  context: HandlerContext = {},
+): Promise<HandlerResult> {
   const handler = HANDLERS[toolName];
   if (!handler) {
     return res(`Unknown tool: ${toolName}`, true);
   }
-  return handler(args);
+  return handler(args, context);
 }

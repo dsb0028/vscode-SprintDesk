@@ -1,6 +1,10 @@
 import { ALL_TOOLS } from './tools';
 import { handleToolCall } from './handlers';
 
+export interface McpRequestOptions {
+  refreshUi?: () => Promise<void>;
+}
+
 export const SERVER_INFO = {
   name: 'sprintdesk-mcp',
   version: '1.1.0'
@@ -29,7 +33,7 @@ export function getToolNames(): string[] {
   return ALL_TOOLS.map(t => t.name);
 }
 
-export async function handleRequest(request: any): Promise<any> {
+export async function handleRequest(request: any, options: McpRequestOptions = {}): Promise<any> {
   const { id, method, params } = request;
 
   try {
@@ -68,13 +72,16 @@ export async function handleRequest(request: any): Promise<any> {
         };
       }
 
-      const result = await handleToolCall(toolName, toolArgs);
+      const result = await handleToolCall(toolName, toolArgs, {
+        refreshUi: options.refreshUi,
+      });
 
       return {
         jsonrpc: '2.0',
         id,
         result: {
-          content: result.content
+          content: result.content,
+          ...(result.isError ? { isError: true } : {})
         }
       };
     }

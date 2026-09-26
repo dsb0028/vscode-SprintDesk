@@ -9,7 +9,11 @@ export interface HandlerResult {
   isError?: boolean;
 }
 
-export type Handler = (args: any) => HandlerResult | Promise<HandlerResult>;
+export interface HandlerContext {
+  refreshUi?: () => Promise<void>;
+}
+
+export type Handler = (args: any, context: HandlerContext) => HandlerResult | Promise<HandlerResult>;
 
 export function res(text: string, isError = false): HandlerResult {
   return { content: [{ type: 'text', text }], isError };
