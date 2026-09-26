@@ -20,7 +20,8 @@ export class BacklogsTreeItem extends vscode.TreeItem {
     public readonly taskPath?: string,
     public readonly sourceBacklogPath?: string,
     public readonly backlogId?: string,
-    public readonly taskId?: string
+    public readonly taskId?: string,
+    taskCount?: number
   ) {
     super(label, collapsibleState);
 
@@ -28,14 +29,7 @@ export class BacklogsTreeItem extends vscode.TreeItem {
       // Setup backlog item
       this.contextValue = 'backlog';
       this.resourceUri = vscode.Uri.file(filePath);
-      // Count tasks in backlog
-      try {
-        const { data } = matter.read(filePath);
-        const taskCount = data.tasks?.length;
-        this.description = `${UI_CONSTANTS.EMOJI.COMMON.TASK_LIST} ${taskCount ? taskCount : 0} tasks`;
-      } catch {
-        this.description = `${UI_CONSTANTS.EMOJI.COMMON.TASK_LIST} 0 tasks`;
-      }
+      this.description = `${UI_CONSTANTS.EMOJI.COMMON.TASK_LIST} ${taskCount ?? 0} tasks`;
 
       // Add backlog icon and tooltip
       this.iconPath = new vscode.ThemeIcon('repo');
@@ -398,7 +392,9 @@ private async addTaskToBacklog(backlogPath: string, taskPath: string): Promise<v
         filePath,
         undefined,
         undefined,
-        backlog.id
+        backlog.id,
+        undefined,
+        dataService.getTasksByBacklog(backlog.id).length
       );
     });
 
