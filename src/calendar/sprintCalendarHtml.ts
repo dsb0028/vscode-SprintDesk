@@ -38,6 +38,7 @@ function renderSegment(
   const detail = `${label}; ${formatDate(item.startDate)} – ${formatDate(item.endDate)}. ${before}${after}`;
   const id = `${kind}-${week}-${index}`;
   return `<div class="segment ${kind}-bar col-${segment.column} span-${segment.span}" tabindex="0"
+      ${task ? `role="button" data-action="openTask" data-task-id="${escapeHtml(task.id)}"` : ''}
       id="${id}" aria-label="${escapeHtml(detail)}" data-detail="${escapeHtml(detail)}">
     ${segment.continuesBefore ? '<span class="continuation" aria-hidden="true">‹</span>' : ''}
     <span class="bar-title">${task ? `<strong class="task-code">${escapeHtml(task.code)}</strong> ` : ''}${escapeHtml(item.title)}</span>
@@ -146,7 +147,7 @@ export function renderSprintCalendarHtml(
     .task-lanes { padding-top: 3px; }
     .segment { display: flex; align-items: center; gap: 4px; min-width: 0; height: 23px; margin: 0 3px; padding: 2px 5px; border: 1px solid var(--calendar-border); border-radius: 3px; cursor: default; }
     .sprint-bar { height: 17px; border-radius: 2px; border-left-width: 2px; color: var(--calendar-muted); background: var(--calendar-background); font-size: .78em; }
-    .task-bar { background: var(--calendar-fill); border-left: 3px solid var(--calendar-link); font-size: .85em; }
+    .task-bar { background: var(--calendar-fill); border-left: 3px solid var(--calendar-link); font-size: .85em; cursor: pointer; }
     .bar-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
     .task-status { font-size: .85em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; color: var(--calendar-muted); }
     .continuation { flex: none; }
@@ -185,7 +186,7 @@ export function renderSprintCalendarHtml(
     </div>
   </div>
   <section class="detail-box" aria-label="Item details"><strong>Item details</strong>
-    <p id="item-details" class="muted">Focus or hover a task or sprint to read its full details.</p>
+    <p id="item-details" class="muted">Focus or hover a task or sprint to read its full details. Click a task or press Enter or Space to open its Markdown file.</p>
   </section>
   <div id="item-popover" hidden aria-hidden="true"></div>
   ${calendar.warnings.length ? `<section class="warnings" role="alert"><h2>Tasks not plotted</h2><ul>${calendar.warnings.map(warning => `<li>${escapeHtml(warning)}</li>`).join('')}</ul></section>` : ''}
@@ -221,9 +222,13 @@ export function renderSprintCalendarHtml(
     popover.hidden = false;
   }
   document.addEventListener('click', event => {
-    const button = event.target.closest('button[data-action]');
+    const button = event.target.closest('[data-action]');
     if (!button || locked) { return; }
     remember();
+    if (button.dataset.action === 'openTask') {
+      vscode.postMessage({ action: 'openTask', taskId: button.dataset.taskId });
+      return;
+    }
     locked = true;
     const message = { action: button.dataset.action };
     if (message.action === 'toggle') { message.week = button.dataset.week; }
@@ -238,7 +243,13 @@ export function renderSprintCalendarHtml(
       if (document.activeElement?.matches('.segment')) { show(document.activeElement); }
     });
   });
-  document.addEventListener('keydown', event => { if (event.key === 'Escape') { popover.hidden = true; } });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { popover.hidden = true; }
+    if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('[data-action="openTask"]')) {
+      event.preventDefault();
+      event.target.click();
+    }
+  });
   document.querySelectorAll('details').forEach(element => element.addEventListener('toggle', remember));
   scroll.addEventListener('scroll', remember, { passive: true });
   window.addEventListener('scroll', remember, { passive: true });

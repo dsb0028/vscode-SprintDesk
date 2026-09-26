@@ -79,6 +79,8 @@ function runSprintCalendarTests(): void {
   assert.match(singleHtml, /class="segment task-bar col-5 span-1"/);
   assert.match(singleHtml, /class="task-code">SPD-1<\/strong> Document Calendar/);
   assert.match(singleHtml, /class="task-status">waiting<\/span>/);
+  assert.match(singleHtml, /role="button" data-action="openTask" data-task-id="task-1"/);
+  assert.match(singleHtml, /Click a task or press Enter or Space to open its Markdown file/);
   assert.equal((singleHtml.match(/<time datetime=/g) ?? []).length, 42);
   assert.match(singleHtml, /datetime="2026-08-31"/);
   assert.match(singleHtml, /datetime="2026-10-11"/);

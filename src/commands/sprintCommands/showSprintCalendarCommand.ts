@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
+import { join } from 'path';
 import { buildSprintCalendar } from '../../calendar/sprintCalendar';
 import { renderSprintCalendarHtml } from '../../calendar/sprintCalendarHtml';
 import { initialCalendarState, localCalendarDate, updateCalendarState } from '../../calendar/sprintCalendarState';
@@ -32,7 +33,21 @@ export function registerShowSprintCalendarCommand(context: vscode.ExtensionConte
           state, today: localCalendarDate(),
         });
       };
-      const messages = panel.webview.onDidReceiveMessage((message: unknown) => {
+      const messages = panel.webview.onDidReceiveMessage(async (message: unknown) => {
+        if (message && typeof message === 'object' && 'action' in message && message.action === 'openTask') {
+          if (Object.keys(message).length !== 2 || !('taskId' in message) || typeof message.taskId !== 'string') {
+            return;
+          }
+          const task = dataService.loadTasks().find(task => task.id === message.taskId);
+          if (!task) {
+            vscode.window.showErrorMessage('Task not found. Reopen the calendar to refresh it.');
+            return;
+          }
+          await vscode.commands.executeCommand(
+            'sprintdesk.editTaskRaw', join(dataService.getTasksDir(), dataService.getTaskFilename(task)),
+          );
+          return;
+        }
         const next = updateCalendarState(state, message, localCalendarDate());
         if (!next) {
           return;
