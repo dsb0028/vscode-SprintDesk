@@ -1,5 +1,6 @@
 import * as taskService from '../../services/taskService';
 import { getStores } from '../../data/stores';
+import { HumanVerification, Task } from '../../data/types';
 import { Handler, HandlerResult, res, getWs, getDs, findTask, resolveAgent, recordAudit } from './helpers';
 
 async function handle_sprintdesk_tasksAssign(args: any): Promise<HandlerResult> {
@@ -88,9 +89,23 @@ async function handle_sprintdesk_updateTask(args: any): Promise<HandlerResult> {
   const task = findTask(ds, args.taskId);
   if (!task) return res(`Task not found: ${args.taskId}`, true);
 
-  const updates: any = {};
+  const updates: Partial<Task> = {};
+  let humanVerification: HumanVerification | undefined;
   if (args.title) updates.title = args.title;
-  if (args.status) updates.status = args.status;
+  if (args.status) {
+    if (args.status === 'done') {
+      humanVerification = getHumanVerification(args);
+      if (!humanVerification) {
+        return res(
+          'Cannot set task status to done without human verification. Provide humanVerification.reviewerId for a registered human reviewer.',
+          true,
+        );
+      }
+      updates.humanVerification = humanVerification;
+      updates.workStatus = 'done';
+    }
+    updates.status = args.status;
+  }
   if (args.priority) updates.priority = args.priority;
   if (args.type) updates.type = args.type;
 
@@ -101,6 +116,15 @@ async function handle_sprintdesk_updateTask(args: any): Promise<HandlerResult> {
   ds.updateTask(task.id, updates);
   const updatedTask = ds.getTask(task.id);
   if (updatedTask) ds.saveTaskMd(updatedTask);
+  if (humanVerification) {
+    recordAudit({
+      actor: humanVerification.reviewerId,
+      action: 'approve',
+      targetType: 'task',
+      targetId: task.id,
+      details: { taskCode: task.code, notes: humanVerification.notes },
+    });
+  }
 
   return res(JSON.stringify(updatedTask, null, 2));
 }
@@ -180,7 +204,7 @@ async function handle_sprintdesk_tasksComplete(args: any): Promise<HandlerResult
   const task = findTask(ds, args.taskId);
   if (!task) return res(`Task not found: ${args.taskId}`, true);
 
-  ds.updateTask(task.id, { workStatus: 'done' });
+  ds.updateTask(task.id, { status: 'under-review', workStatus: 'review' });
 
   if (args.runId) {
     getStores().runs.update(args.runId as string, {
@@ -194,6 +218,21 @@ async function handle_sprintdesk_tasksComplete(args: any): Promise<HandlerResult
   if (updatedTask) ds.saveTaskMd(updatedTask);
 
   return res(JSON.stringify(updatedTask, null, 2));
+}
+
+function getHumanVerification(args: any): HumanVerification | undefined {
+  const reviewerId = args.humanVerification?.reviewerId;
+  const reviewer = resolveAgent(reviewerId);
+  if (!reviewerId || !reviewer || reviewer.role !== 'human') {
+    return undefined;
+  }
+
+  return {
+    reviewerId: reviewer.id,
+    reviewerName: reviewer.name,
+    approvedAt: new Date().toISOString(),
+    ...(args.humanVerification.notes ? { notes: args.humanVerification.notes } : {}),
+  };
 }
 
 export const TASK_HANDLERS: Record<string, Handler> = {

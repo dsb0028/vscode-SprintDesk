@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setFileSystem, setHost } from '../host';
 import { NodeFileSystem } from '../host/NodeFileSystem';
@@ -23,12 +22,14 @@ function getRefreshSnapshot(response: any): Record<string, unknown> {
 }
 
 async function runMcpCoreTests(): Promise<void> {
-  const workspace = mkdtempSync(join(tmpdir(), 'sprintdesk-mcp-'));
+  const workspace = join(process.cwd(), 'out', '.sprintdesk-mcp-test-workspace');
   const dataDirectory = join(workspace, '.SprintDesk', 'data');
+  const workforceDirectory = join(workspace, '.SprintDesk', 'workforce');
   const tasksPath = join(dataDirectory, 'tasks.yml');
   const backlogsPath = join(dataDirectory, 'backlogs.yml');
 
   try {
+    rmSync(workspace, { recursive: true, force: true });
     setHost(createHost(workspace));
     setFileSystem(new NodeFileSystem());
     mkdirSync(dataDirectory, { recursive: true });
@@ -64,6 +65,17 @@ async function runMcpCoreTests(): Promise<void> {
     );
     writeFileSync(join(dataDirectory, 'epics.yml'), 'epics: []\n');
     writeFileSync(join(dataDirectory, 'sprints.yml'), 'sprints: []\n');
+    mkdirSync(workforceDirectory, { recursive: true });
+    writeFileSync(
+      join(workforceDirectory, 'employees.yml'),
+      `employees:
+  - id: reviewer-1
+    name: Human Reviewer
+    role: human
+    createdAt: '2026-01-01T00:00:00.000Z'
+    updatedAt: '2026-01-01T00:00:00.000Z'
+`,
+    );
 
     const toolsResponse = await handleRequest({
       jsonrpc: '2.0',
@@ -73,6 +85,51 @@ async function runMcpCoreTests(): Promise<void> {
     });
     const toolNames = toolsResponse.result.tools.map((tool: { name: string }) => tool.name);
     assert.ok(toolNames.includes('sprintdesk_refresh'));
+    const updateTaskTool = toolsResponse.result.tools.find((tool: { name: string }) => tool.name === 'sprintdesk_updateTask');
+    assert.ok(updateTaskTool.inputSchema.properties.status.enum.includes('under-review'));
+    assert.ok(updateTaskTool.inputSchema.properties.humanVerification);
+
+    const completeResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 6,
+      method: 'tools/call',
+      params: { name: 'sprintdesk_tasksComplete', arguments: { taskId: 'SPD-1' } },
+    });
+    const underReviewTask = JSON.parse(completeResponse.result.content[0].text);
+    assert.equal(underReviewTask.status, 'under-review');
+    assert.equal(underReviewTask.workStatus, 'review');
+
+    const missingReviewResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 7,
+      method: 'tools/call',
+      params: { name: 'sprintdesk_updateTask', arguments: { taskId: 'SPD-1', status: 'done' } },
+    });
+    assert.equal(missingReviewResponse.result.isError, true);
+    assert.match(missingReviewResponse.result.content[0].text, /human verification/);
+
+    const doneResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 8,
+      method: 'tools/call',
+      params: {
+        name: 'sprintdesk_updateTask',
+        arguments: {
+          taskId: 'SPD-1',
+          status: 'done',
+          humanVerification: { reviewerId: 'reviewer-1', notes: 'Reviewed and approved.' },
+        },
+      },
+    });
+    const doneTask = JSON.parse(doneResponse.result.content[0].text);
+    assert.equal(doneTask.status, 'done');
+    assert.equal(doneTask.workStatus, 'done');
+    assert.deepEqual(doneTask.humanVerification, {
+      reviewerId: 'reviewer-1',
+      reviewerName: 'Human Reviewer',
+      approvedAt: doneTask.humanVerification.approvedAt,
+      notes: 'Reviewed and approved.',
+    });
 
     const beforeRefresh = readFileSync(tasksPath, 'utf8');
     let refreshCalls = 0;
@@ -99,7 +156,7 @@ async function runMcpCoreTests(): Promise<void> {
       backlogs: 1,
       runs: 0,
       events: 0,
-      employees: 0,
+      employees: 1,
     });
     assert.deepEqual(httpSnapshot.backlogTaskCounts, [
       { id: 'technical', title: 'TECHNICAL', taskCount: 1 },
@@ -145,7 +202,7 @@ async function runMcpCoreTests(): Promise<void> {
       backlogs: 1,
       runs: 0,
       events: 0,
-      employees: 0,
+      employees: 1,
     });
     assert.equal(refreshCalls, 1);
 

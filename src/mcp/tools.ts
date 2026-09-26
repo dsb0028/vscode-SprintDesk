@@ -27,13 +27,22 @@ export const TASK_TOOLS = [
   },
   {
     name: 'sprintdesk_updateTask',
-    description: 'Update a task',
+    description: 'Update a task. Setting status to done requires humanVerification with a registered human reviewer.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         taskId: { type: 'string', description: 'Task ID or code' },
         title: { type: 'string', description: 'New title' },
-        status: { type: 'string', enum: ['waiting', 'in-progress', 'done', 'blocked', 'cancelled'] },
+        status: { type: 'string', enum: ['waiting', 'in-progress', 'under-review', 'done', 'blocked', 'cancelled'] },
+        humanVerification: {
+          type: 'object',
+          description: 'Required when status is done; records approval by a registered human reviewer.',
+          properties: {
+            reviewerId: { type: 'string', description: 'Registered human reviewer ID or name' },
+            notes: { type: 'string', description: 'Optional human review notes' },
+          },
+          required: ['reviewerId'],
+        },
         priority: { type: 'string', enum: ['high', 'medium', 'low'] },
         type: { type: 'string', enum: ['feature', 'bug', 'chore', 'doc', 'test'] },
       },
@@ -57,7 +66,7 @@ export const TASK_TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        status: { type: 'string', enum: ['waiting', 'in-progress', 'done', 'blocked', 'cancelled'] },
+        status: { type: 'string', enum: ['waiting', 'in-progress', 'under-review', 'done', 'blocked', 'cancelled'] },
         limit: { type: 'number', description: 'Max tasks to return' },
       },
     },
@@ -370,7 +379,7 @@ export const TASK_WORK_TOOLS = [
   },
   {
     name: 'sprintdesk_tasksComplete',
-    description: 'Mark a task complete in the workforce workflow (sets workStatus=done; does not change classic status)',
+    description: 'Submit completed automated work for human review (sets task status to under-review and workStatus=review).',
     inputSchema: {
       type: 'object' as const,
       properties: {

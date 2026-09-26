@@ -5,7 +5,7 @@
 declare global {
     namespace SprintDesk {
         type TaskType = 'feature' | 'bug' | 'improvement' | 'documentation' | 'test';
-        type TaskStatus = 'waiting' | 'started' | 'done' | 'blocked' | 'canceled';
+        type TaskStatus = 'waiting' | 'started' | 'under-review' | 'done' | 'blocked' | 'canceled';
         type Priority = 'high' | 'medium' | 'low';
         type EpicStatus = 'planned' | 'started' | 'completed' | 'blocked';
         type ITaskBacklog = { _id: string; title: string; path: string; };

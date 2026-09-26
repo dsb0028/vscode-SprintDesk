@@ -5,7 +5,7 @@ export interface Task {
   name: string;
   title: string;
   type: 'feature' | 'bug' | 'chore' | 'doc' | 'test';
-  status: 'waiting' | 'in-progress' | 'done' | 'blocked' | 'cancelled';
+  status: TaskStatus;
   priority: 'high' | 'medium' | 'low';
   epic: string | null;
   backlog: string;
@@ -26,6 +26,16 @@ export interface Task {
   childTaskIds?: string[];
   runId?: string;
   attempts?: number;
+  humanVerification?: HumanVerification;
+}
+
+export type TaskStatus = 'waiting' | 'in-progress' | 'under-review' | 'done' | 'blocked' | 'cancelled';
+
+export interface HumanVerification {
+  reviewerId: string;
+  reviewerName: string;
+  approvedAt: string;
+  notes?: string;
 }
 
 export type TaskWorkStatus =

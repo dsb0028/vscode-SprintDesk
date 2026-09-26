@@ -79,6 +79,7 @@ export class TaskTreeItem extends vscode.TreeItem {
       case 'not-started': return '⏳';
       case 'waiting': return '⏳';
       case 'in-progress': return '🔄';
+      case 'under-review': return '🔎';
       case 'done': return '✅';
       case 'blocked': return '⛔';
       case 'cancelled': return '❌';
@@ -118,7 +119,7 @@ export class TaskTreeItem extends vscode.TreeItem {
       }
     }
 
-    this.label = `${this.taskData.name || this.taskData.title} ${statusEmoji}`;
+    this.label = `${this.taskData.name || this.taskData.title} [${this.taskData.status}] ${statusEmoji}`;
 
     // Set description with priority and epic
     const description = [this.getPriorityEmoji(this.taskData.priority)];
