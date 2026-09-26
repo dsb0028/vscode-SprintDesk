@@ -19,7 +19,7 @@
 
 ### 🔄 Sprint Management
 - Sprint creation and planning
-- Sprint calendar visualization
+- Read-only sprint calendar visualization with inclusive sprint ranges and assigned task lists
 - Add existing tasks to sprints
 - Sprint progress tracking
 - Sprint file management

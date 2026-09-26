@@ -29,6 +29,7 @@
     "package:ext": "webpack --mode production --config ./webpack/extension.config.js",
     "package:wv": "webpack --mode production --config ./webpack/webview.config.js",
     "compile-tests": "tsc -p . --outDir out --noEmit false",
+    "test:calendar": "npm run compile-tests && node out/calendar/sprintCalendar.test.js",
     "watch-tests": "tsc -p . -w --outDir out --noEmit false",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
