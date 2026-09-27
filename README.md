@@ -49,8 +49,8 @@ including tasks that are not assigned to a sprint.
   **Today** to navigate; the selected month is retained while the panel is open.
 - Each month has six Monday-first weeks. Adjacent-month dates are subdued,
   weekends have a subtle background, and today's date is highlighted.
-- Sprint ribbons provide context above the task lanes, with one label per
-  weekly segment instead of a repeated label in every day.
+- Sprint ribbons and their assigned task bars use a shared, sprint-specific
+  color. The legend and selected sprint sidebar use the same color.
 - Single-day and multi-day tasks share the same aligned lanes. A multi-day
   bar spans its dates and continues in the following week when necessary.
 - Busy weeks initially show up to two sprint lanes and three task lanes.
@@ -60,9 +60,13 @@ including tasks that are not assigned to a sprint.
   and expansion controls are keyboard accessible.
 - Click a task bar (or focus it and press **Enter** or **Space**) to open its
   Markdown task file in the editor.
+- Select a sprint ribbon to use its right-hand task sidebar. Select a task
+  directly to open it. **Add a task** opens the backlog-task picker; removing
+  a task from that picker returns it to its backlog.
+- Hover a sprint ribbon to change its color or reveal its delete control.
+  Deleting a sprint returns its assigned tasks to their backlogs.
 - On narrow panels, scroll the calendar horizontally to preserve readable
-  date columns. Expand the secondary sprint membership section to inspect
-  assigned tasks, including those without scheduled dates.
+  date columns.
 
 ### Schedule tasks
 
@@ -85,9 +89,9 @@ reopen the calendar to see the changes.
 - Partial, invalid, or reversed task dates produce a visible warning and are not
   plotted. Task ranges are not clipped to their sprint's dates.
 
-This is a read-only view; date pickers, drag-to-schedule, and automatic refresh
-are not included. Navigation and expansion do not change task data. Reopen the
-calendar after changing the data file to load the updated schedule. Editing a
+Date pickers, drag-to-schedule, and automatic refresh are not included.
+Navigation and expansion do not change task data. Sprint membership, sprint
+color, and sprint deletion are updated directly in the calendar. Editing a
 task's Markdown description does not update its schedule in the YAML data.
 
 Calendar development checks:

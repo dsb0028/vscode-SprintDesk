@@ -7,6 +7,7 @@ export interface CalendarTask {
   status: Task['status'];
   priority: Task['priority'];
   path?: string;
+  sprintId: string | null;
 }
 
 export interface ScheduledTask extends CalendarTask {
@@ -20,6 +21,7 @@ export interface CalendarSprint {
   startDate: string;
   endDate: string;
   tasks: CalendarTask[];
+  color: string;
 }
 
 export interface SprintCalendar {
@@ -28,7 +30,10 @@ export interface SprintCalendar {
   sprints: CalendarSprint[];
   tasks: ScheduledTask[];
   warnings: string[];
+  backlogTasks: CalendarTask[];
 }
+
+const SPRINT_COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#f97316', '#14b8a6', '#84cc16'];
 
 function toIsoDate(value: unknown): string | null {
   if (typeof value !== 'string') {
@@ -65,6 +70,7 @@ function toCalendarTask(task: Task): CalendarTask {
     status: task.status,
     priority: task.priority,
     path: task.path,
+    sprintId: task.sprint,
   };
 }
 
@@ -91,7 +97,7 @@ export function buildSprintCalendar(sprints: Sprint[], tasks: Task[]): SprintCal
     || left.code.localeCompare(right.code)
   ));
 
-  for (const sprint of sprints) {
+  for (const [index, sprint] of sprints.entries()) {
     const parsedStartDate = toIsoDate(sprint.startDate);
     const parsedEndDate = toIsoDate(sprint.endDate);
     if (!parsedStartDate || !parsedEndDate) {
@@ -112,6 +118,7 @@ export function buildSprintCalendar(sprints: Sprint[], tasks: Task[]): SprintCal
       startDate,
       endDate,
       tasks: sprintTasks,
+      color: /^#[0-9a-fA-F]{6}$/.test(sprint.color ?? '') ? sprint.color! : SPRINT_COLORS[index % SPRINT_COLORS.length],
     });
   }
 
@@ -139,5 +146,6 @@ export function buildSprintCalendar(sprints: Sprint[], tasks: Task[]): SprintCal
     sprints: calendarSprints,
     tasks: scheduledTasks,
     warnings,
+    backlogTasks: tasks.filter(task => task.sprint === null).map(toCalendarTask),
   };
 }

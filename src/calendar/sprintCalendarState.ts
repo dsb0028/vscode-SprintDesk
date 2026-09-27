@@ -4,6 +4,7 @@ export interface CalendarViewState {
   month: string;
   expandedWeeks: string[];
   focusId: string | null;
+  selectedSprintId?: string | null;
 }
 
 export function localCalendarDate(now = new Date()): string {
@@ -11,7 +12,7 @@ export function localCalendarDate(now = new Date()): string {
 }
 
 export function initialCalendarState(today: string): CalendarViewState {
-  return { month: today.slice(0, 7), expandedWeeks: [], focusId: null };
+  return { month: today.slice(0, 7), expandedWeeks: [], focusId: null, selectedSprintId: null };
 }
 
 /** Reject unknown fields as well as unknown actions: the webview has no write protocol. */
@@ -48,5 +49,5 @@ export function updateCalendarState(
     }
     month = date.toISOString().slice(0, 7);
   }
-  return { month, expandedWeeks: [], focusId: `nav-${data.action}` };
+  return { month, expandedWeeks: [], focusId: `nav-${data.action}`, selectedSprintId: state.selectedSprintId };
 }

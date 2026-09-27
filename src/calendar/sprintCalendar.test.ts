@@ -65,7 +65,7 @@ function runSprintCalendarTests(): void {
   assert.match(html, /Document Calendar/);
   assert.equal(calendar.tasks.length, 0);
   assert.doesNotMatch(html, /class="segment task-bar/);
-  assert.match(html, /Not scheduled on calendar \(undated or invalid dates\)/);
+  assert.match(html, /class="sidebar-task sprint-color-0"/);
 
   const singleDay: Task = { ...task, startDate: '2026-09-25', endDate: '2026-09-25' };
   const scheduled = buildSprintCalendar([], [singleDay]);
@@ -73,7 +73,7 @@ function runSprintCalendarTests(): void {
   assert.equal(scheduled.endDate, '2026-09-25');
   assert.deepEqual(scheduled.tasks[0], {
     id: task.id, code: task.code, title: task.title, status: task.status,
-    priority: task.priority, path: task.path, startDate: '2026-09-25', endDate: '2026-09-25',
+    priority: task.priority, path: task.path, sprintId: task.sprint, startDate: '2026-09-25', endDate: '2026-09-25',
   });
   const singleHtml = renderSprintCalendarHtml(scheduled, 'test-nonce', septemberView);
   assert.match(singleHtml, /class="segment task-bar col-5 span-1"/);
@@ -90,6 +90,9 @@ function runSprintCalendarTests(): void {
   const sparseHtml = renderSprintCalendarHtml(
     buildSprintCalendar([sprint], [singleDay]), 'test-nonce', septemberView,
   );
+  assert.match(sparseHtml, /class="sprint-sidebar sprint-color-0"/);
+  assert.match(sparseHtml, /data-action="toggleTaskPicker"/);
+  assert.match(sparseHtml, /class="legend-item sprint-color-0">Calendar Sprint/);
   assert.equal((sparseHtml.match(/class="lane task-lane"/g) ?? []).length, 6);
   assert.equal((sparseHtml.match(/class="lane sprint-lane"/g) ?? []).length, 6);
 
@@ -191,6 +194,18 @@ function runSprintCalendarTests(): void {
   assert.match(expandedHtml, /Collapse week/);
   assert.match(expandedHtml, /data-focus="week-2026-09-21-toggle"/);
   assert.match(expandedHtml, /tabindex="0"[^>]+aria-label="SPD-0: Document Calendar; waiting; high; Sep 25, 2026 – Sep 25, 2026/s);
+
+  const colored = buildSprintCalendar([{ ...sprint, color: '#ec4899' }], [singleDay]);
+  const coloredHtml = renderSprintCalendarHtml(colored, 'test-nonce', septemberView);
+  assert.match(coloredHtml, /\.sprint-color-0, \[data-sprint-color="0"\] \{ --sprint-color: #ec4899; \}/);
+  assert.match(coloredHtml, /class="color-swatch selected"[^>]+data-action="setSprintColor"[^>]+data-color="#ec4899"/);
+  assert.match(coloredHtml, /data-action="deleteSprint"/);
+  assert.match(coloredHtml, /class="task-remove" data-action="removeTask"/);
+
+  const unassigned = { ...singleDay, id: 'backlog-task', code: 'SPD-2', sprint: null };
+  const sidebarHtml = renderSprintCalendarHtml(buildSprintCalendar([{ ...sprint, tasks: [] }], [unassigned]), 'test-nonce', septemberView);
+  assert.match(sidebarHtml, /No tasks are assigned to this sprint/);
+  assert.match(sidebarHtml, /data-action="assignTask"[\s\S]+data-task-id="backlog-task"/);
 
   const workspace = mkdtempSync(join(tmpdir(), 'sprintdesk-calendar-test-'));
   try {

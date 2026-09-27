@@ -52,14 +52,16 @@ export async function runSprintCalendarCommandTests(): Promise<void> {
     sprint: 'sprint-1', startDate: '2026-09-25', endDate: '2026-09-25',
     createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
   };
-  const fixtureSprint: Sprint = {
+  let fixtureSprint: Sprint = {
     id: 'sprint-1', number: 1, title: 'Calendar Sprint', name: 'calendar-sprint',
     startDate: '2026-09-21', endDate: '2026-09-27', status: 'planned', tasks: ['task-1'],
     createdAt: fixtureTask.createdAt, updatedAt: fixtureTask.updatedAt,
   };
   const tasks = Array.from({ length: 5 }, (_, index) => ({ ...fixtureTask, id: `task-${index}` }));
+  tasks[1].sprint = null;
   const originalData = JSON.stringify(tasks);
   let today = '2026-09-25';
+  let sprintDeleted = false;
   let taskReads = 0;
   let sprintReads = 0;
   let command: ((item?: { filePath?: string }) => Promise<void>) | undefined;
@@ -108,14 +110,27 @@ export async function runSprintCalendarCommandTests(): Promise<void> {
     },
   };
   const storage = new Proxy({
-    loadSprints: () => { sprintReads++; return [fixtureSprint]; },
+    loadSprints: () => { sprintReads++; return sprintDeleted ? [] : [fixtureSprint]; },
     loadTasks: () => { taskReads++; return tasks; },
+    getSprint: (id: string) => !sprintDeleted && id === fixtureSprint.id ? fixtureSprint : undefined,
+    getTask: (id: string) => tasks.find(task => task.id === id),
+    updateSprint: (id: string, updates: Partial<Sprint>) => {
+      assert.equal(id, fixtureSprint.id);
+      fixtureSprint = { ...fixtureSprint, ...updates };
+    },
+    updateTask: (id: string, updates: Partial<Task>) => {
+      const index = tasks.findIndex(task => task.id === id);
+      assert.notEqual(index, -1);
+      tasks[index] = { ...tasks[index], ...updates };
+    },
+    deleteSprint: (id: string) => { assert.equal(id, fixtureSprint.id); sprintDeleted = true; },
     getTasksDir: () => '/workspace/.SprintDesk/Tasks',
     getTaskFilename: (task: Task) => `[${task.code}]_${task.name}.md`,
   }, {
     get(target, property) {
-      assert.ok(property === 'loadTasks' || property === 'loadSprints'
-        || property === 'getTasksDir' || property === 'getTaskFilename',
+      assert.ok(property === 'loadTasks' || property === 'loadSprints' || property === 'getSprint'
+        || property === 'getTask' || property === 'updateSprint' || property === 'updateTask'
+        || property === 'deleteSprint' || property === 'getTasksDir' || property === 'getTaskFilename',
       `Unexpected storage access: ${String(property)}`);
       return target[property];
     },
@@ -201,12 +216,28 @@ export async function runSprintCalendarCommandTests(): Promise<void> {
     assert.equal(panel.webview.html, beforeOpen);
     assert.equal(JSON.stringify(tasks), originalData);
 
+    panel.receive({ action: 'selectSprint', sprintId: 'sprint-1' });
+    assert.match(panel.webview.html, /class="sprint-sidebar sprint-color-0"/);
+    panel.receive({ action: 'setSprintColor', sprintId: 'sprint-1', color: '#ec4899' });
+    assert.equal(fixtureSprint.color, '#ec4899');
+    assert.match(panel.webview.html, /--sprint-color: #ec4899/);
+    panel.receive({ action: 'removeTask', sprintId: 'sprint-1', taskId: 'task-1' });
+    assert.equal(tasks.find(task => task.id === 'task-1')?.sprint, null);
+    assert.match(panel.webview.html, /No tasks are assigned to this sprint/);
+    panel.receive({ action: 'assignTask', sprintId: 'sprint-1', taskId: 'task-1' });
+    assert.equal(fixtureSprint.tasks.filter(id => id === 'task-1').length, 1);
+    panel.receive({ action: 'assignTask', sprintId: 'sprint-1', taskId: 'task-1', extra: true });
+    assert.equal(fixtureSprint.tasks.filter(id => id === 'task-1').length, 1);
+
     await command({ filePath: '/selected/task.md' });
     assert.deepEqual(roots, ['/workspace', '/selected']);
     assert.equal(panels.length, 2);
     panels[1].receive({ action: 'next' });
     assert.match(panels[1].webview.html, /data-month="2027-02"/);
     assert.match(panel.webview.html, /data-month="2027-01"/);
+    panel.receive({ action: 'deleteSprint', sprintId: 'sprint-1' });
+    assert.match(panel.webview.html, /No sprints are available/);
+    assert.equal(tasks.find(task => task.id === 'task-1')?.sprint, null);
     panel.dispose();
     assert.equal(panel.messagesDisposed, true);
     assert.equal(panel.disposalListenerDisposed, true);

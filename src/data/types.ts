@@ -140,6 +140,7 @@ export interface Sprint {
   createdAt: string;
   updatedAt: string;
   path?: string;
+  color?: string;
 }
 
 export interface IdsConfig {

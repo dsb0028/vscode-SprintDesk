@@ -3,7 +3,7 @@ import { SprintCalendar } from './sprintCalendar';
 import { buildMonthLayout } from './sprintCalendarLayout';
 import { initialCalendarState, localCalendarDate, updateCalendarState } from './sprintCalendarState';
 
-const empty: SprintCalendar = { startDate: null, endDate: null, sprints: [], tasks: [], warnings: [] };
+const empty: SprintCalendar = { startDate: null, endDate: null, sprints: [], tasks: [], warnings: [], backlogTasks: [] };
 const september = buildMonthLayout(empty, '2026-09', '2026-09-25');
 assert.equal(september.weeks.length, 6);
 assert.equal(september.weeks[0].days[0].date, '2026-08-31');
@@ -20,9 +20,9 @@ assert.equal(localCalendarDate(new Date(2026, 8, 25, 23, 59)), '2026-09-25');
 
 const tasks = Array.from({ length: 5 }, (_, index) => ({
   id: `task-${index}`, code: `SPD-${index}`, title: `Task ${index}`, status: 'waiting' as const,
-  priority: 'medium' as const, startDate: '2026-09-25', endDate: '2026-10-06',
+  priority: 'medium' as const, sprintId: null, startDate: '2026-09-25', endDate: '2026-10-06',
 }));
-const crowded = { ...empty, tasks, sprints: tasks.slice(0, 4).map(item => ({ ...item, tasks: [] })) };
+const crowded = { ...empty, tasks, sprints: tasks.slice(0, 4).map((item, index) => ({ ...item, tasks: [], color: `#00000${index}` })) };
 const layout = buildMonthLayout(crowded, '2026-09', '2026-09-25');
 const week = layout.weeks[3];
 assert.deepEqual(week.tasks.map(segment => [segment.column, segment.span, segment.lane]), [
@@ -64,7 +64,7 @@ for (const current of layout.weeks) {
 }
 
 const initial = initialCalendarState('2026-09-25');
-assert.deepEqual(initial, { month: '2026-09', expandedWeeks: [], focusId: null });
+assert.deepEqual(initial, { month: '2026-09', expandedWeeks: [], focusId: null, selectedSprintId: null });
 const expanded = updateCalendarState(initial, { action: 'toggle', week: '2026-09-21' }, '2026-09-25');
 assert.deepEqual(expanded?.expandedWeeks, ['2026-09-21']);
 assert.equal(expanded?.focusId, 'week-2026-09-21-toggle');
