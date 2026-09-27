@@ -10,7 +10,7 @@ A productivity extension for managing tasks, epics, backlogs, and sprints direct
 - **Epics & Backlogs:** Group tasks under epics and backlogs for better planning and tracking.
 - **Quick Add Command:** Use the "Add Quickly" command to create tasks, epics, and backlog entries with a single input.
 - **Sprint Planning:** Move tasks from backlogs to sprints for active development.
-- **Task Calendar:** Browse a month view with aligned task bars, subtle sprint ribbons, and expandable busy weeks.
+- **Task Calendar:** Browse sprint-colored task cards, date-range ribbons, and an interactive task-details sidebar.
 - **VSCode Integration:** Access all features from the sidebar and command palette.
 - **Markdown Linking:** Tasks, epics, and backlogs are interlinked using Markdown for easy navigation.
 
@@ -40,33 +40,44 @@ A productivity extension for managing tasks, epics, backlogs, and sprints direct
 ## Task Calendar
 
 Run **SprintDesk: Show Sprint Calendar** from the Command Palette or a sprint's
-context menu. The view includes sprint dates and explicitly scheduled tasks,
-including tasks that are not assigned to a sprint.
+context menu. The view uses your workspace's actual sprint records, scheduled
+tasks, statuses, priorities, and task Markdown descriptions. Only tasks assigned
+to a sprint appear on the calendar; unassigned work stays in the backlog.
 
 ### Browse the calendar
 
 - The calendar opens on the current month. Use **Previous**, **Next**, and
   **Today** to navigate; the selected month is retained while the panel is open.
-- Each month has six Monday-first weeks. Adjacent-month dates are subdued,
+- Each month contains the Monday-first weeks needed to show every date. Adjacent-month dates are subdued,
   weekends have a subtle background, and today's date is highlighted.
-- Sprint ribbons and their assigned task bars use a shared, sprint-specific
-  color. The legend and selected sprint sidebar use the same color.
-- Single-day and multi-day tasks share the same aligned lanes. A multi-day
-  bar spans its dates and continues in the following week when necessary.
-- Busy weeks initially show up to two sprint lanes and three task lanes.
+- Sprint ribbons sit above the weekday header in separate date-positioned lanes.
+  Each sprint's ribbon, task cards, legend marker, selected details, and task
+  dropdown share its independently stored color.
+- Task cards appear inside their scheduled date cells. Multi-day tasks appear on
+  every date in their inclusive range, including weekends and following weeks.
+- Busy dates initially show up to three task cards.
   Use the **more** controls to reveal the remaining items, then collapse
   the week again. Navigation to another month resets expanded weeks.
-- Focus or hover over a task or sprint to read its full details. Navigation
-  and expansion controls are keyboard accessible.
-- Click a task bar (or focus it and press **Enter** or **Space**) to open its
-  Markdown task file in the editor.
-- Select a sprint ribbon to use its right-hand task sidebar. Select a task
-  directly to open it. **Add a task** opens the backlog-task picker; removing
-  a task from that picker returns it to its backlog.
-- Hover a sprint ribbon to change its color or reveal its delete control.
+- Hover or focus a task for a short title/date/status preview. Click a card or
+  choose a task from **Tasks** to display its full details in the existing sidebar.
+  There is no second **Show details** action. **Open task** opens its Markdown
+  file; **Clear selection** or **Escape** clears the selection.
+- The **Tasks** dropdown lists the selected sprint's tasks. Removal controls are
+  visible only while the dropdown is open. Removing a task unassigns it from the
+  sprint without deleting the task, its backlog membership, or its planned dates.
+  The current sprint's undated members are available here even when its grid is empty.
+- Choose the target sprint and use **Add a task** to open the backlog picker,
+  then explicitly choose a task. Assignment does not invent dates; undated tasks
+  remain off the grid until scheduled.
+- Hover or focus a sprint ribbon to open its anchored color picker and delete control.
   Deleting a sprint returns its assigned tasks to their backlogs.
-- On narrow panels, scroll the calendar horizontally to preserve readable
-  date columns.
+- Empty ranges show the full calendar with a compact **No sprint tasks in this
+  range** message. **View unassigned tasks** opens a backlog-task chooser.
+- On narrow panels, scroll the calendar region horizontally to preserve date
+  columns; the same task-details sidebar moves below it.
+- Use **Refresh** to reload changes made by other SprintDesk views or tools.
+  Month navigation also reloads workspace records. Calendar membership and color
+  changes update the calendar immediately and refresh the other SprintDesk views.
 
 ### Schedule tasks
 
@@ -80,7 +91,7 @@ endDate: '2026-09-28'
 
 Use quoted `YYYY-MM-DD` strings; `DD-MM-YYYY` strings are also accepted.
 Set both fields to the same date for a single-day task. Save the data file and
-reopen the calendar to see the changes.
+choose **Refresh** in the calendar to see the changes.
 
 - End dates are inclusive and ranges include weekends. Dates are treated as
   calendar dates, without timezone conversion.
@@ -89,7 +100,7 @@ reopen the calendar to see the changes.
 - Partial, invalid, or reversed task dates produce a visible warning and are not
   plotted. Task ranges are not clipped to their sprint's dates.
 
-Date pickers, drag-to-schedule, and automatic refresh are not included.
+Date pickers, drag-to-schedule, and background file watching are not included.
 Navigation and expansion do not change task data. Sprint membership, sprint
 color, and sprint deletion are updated directly in the calendar. Editing a
 task's Markdown description does not update its schedule in the YAML data.

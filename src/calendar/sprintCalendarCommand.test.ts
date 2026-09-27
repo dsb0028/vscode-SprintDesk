@@ -58,20 +58,33 @@ export async function runSprintCalendarCommandTests(): Promise<void> {
     createdAt: fixtureTask.createdAt, updatedAt: fixtureTask.updatedAt,
   };
   const tasks = Array.from({ length: 5 }, (_, index) => ({ ...fixtureTask, id: `task-${index}` }));
-  tasks[1].sprint = null;
+  tasks[4].sprint = null;
   const originalData = JSON.stringify(tasks);
   let today = '2026-09-25';
   let sprintDeleted = false;
   let taskReads = 0;
   let sprintReads = 0;
+  let taskWrites = 0;
+  let sprintWrites = 0;
+  const failedTaskWrites = new Set<number>();
+  const failedSprintWrites = new Set<number>();
+  let descriptionFailure = false;
+  let refreshes = 0;
   let command: ((item?: { filePath?: string }) => Promise<void>) | undefined;
   let registrationDisposed = false;
   const errors: string[] = [];
   const roots: string[] = [];
   const panels: CalendarPanelDouble[] = [];
   const openedTasks: string[] = [];
-  const workspace: { workspaceFolders: { uri: { fsPath: string } }[]; getWorkspaceFolder: (uri: { fsPath: string }) => { uri: { fsPath: string } } } = {
+  const workspace: { workspaceFolders: { uri: { fsPath: string } }[];
+    openTextDocument: (uri: { fsPath: string }) => Promise<{getText(): string}>;
+    getWorkspaceFolder: (uri: { fsPath: string }) => { uri: { fsPath: string } } } = {
     workspaceFolders: [],
+    openTextDocument: async uri => {
+      assert.ok(uri.fsPath.startsWith('/workspace/.SprintDesk/Tasks/'));
+      if (descriptionFailure) {throw new Error('Description file unavailable');}
+      return {getText: () => '## Description\nReal authored description.\nSecond line.\n## Notes\nNot the description.'};
+    },
     getWorkspaceFolder: uri => {
       assert.equal(uri.fsPath, '/selected/task.md');
       return { uri: { fsPath: '/selected' } };
@@ -79,8 +92,10 @@ export async function runSprintCalendarCommandTests(): Promise<void> {
   };
   const host = {
     commands: {
-      executeCommand: async (name: string, filePath: string): Promise<void> => {
+      executeCommand: async (name: string, filePath?: string): Promise<void> => {
+        if (name === 'sprintdesk.refresh') {refreshes++; return;}
         assert.equal(name, 'sprintdesk.editTaskRaw');
+        assert.ok(filePath);
         openedTasks.push(filePath);
       },
       registerCommand: (name: string, callback: NonNullable<typeof command>): Disposable => {
@@ -111,7 +126,16 @@ export async function runSprintCalendarCommandTests(): Promise<void> {
   };
   const storage = new Proxy({
     loadSprints: () => { sprintReads++; return sprintDeleted ? [] : [fixtureSprint]; },
-    loadTasks: () => { taskReads++; return tasks; },
+    loadTasks: () => { taskReads++; return tasks.map(task => ({...task})); },
+    saveTasks: (updated: Task[]) => {
+      tasks.splice(0,tasks.length,...updated);
+      if (failedTaskWrites.has(++taskWrites)) {throw new Error('Task save failed');}
+    },
+    saveSprints: (updated: Sprint[]) => {
+      sprintDeleted = updated.length === 0;
+      if (updated.length) {fixtureSprint = updated[0];}
+      if (failedSprintWrites.has(++sprintWrites)) {throw new Error('Sprint save failed');}
+    },
     getSprint: (id: string) => !sprintDeleted && id === fixtureSprint.id ? fixtureSprint : undefined,
     getTask: (id: string) => tasks.find(task => task.id === id),
     updateSprint: (id: string, updates: Partial<Sprint>) => {
@@ -130,7 +154,8 @@ export async function runSprintCalendarCommandTests(): Promise<void> {
     get(target, property) {
       assert.ok(property === 'loadTasks' || property === 'loadSprints' || property === 'getSprint'
         || property === 'getTask' || property === 'updateSprint' || property === 'updateTask'
-        || property === 'deleteSprint' || property === 'getTasksDir' || property === 'getTaskFilename',
+        || property === 'deleteSprint' || property === 'getTasksDir' || property === 'getTaskFilename'
+        || property === 'saveTasks' || property === 'saveSprints',
       `Unexpected storage access: ${String(property)}`);
       return target[property];
     },
@@ -170,7 +195,7 @@ export async function runSprintCalendarCommandTests(): Promise<void> {
     const panel = panels[0];
     assert.deepEqual(roots, ['/workspace']);
     assert.match(panel.webview.html, /data-month="2026-09"/);
-    assert.match(panel.webview.html, /2 more tasks/);
+    assert.match(panel.webview.html, /1 more tasks/);
     panel.receive({ action: 'next' });
     assert.match(panel.webview.html, /data-month="2026-10"/);
     assert.match(panel.webview.html, /data-focus="nav-next"/);
@@ -196,8 +221,8 @@ export async function runSprintCalendarCommandTests(): Promise<void> {
     panel.receive({ action: 'today' });
     assert.match(panel.webview.html, /data-month="2027-01"/);
     assert.match(panel.webview.html, /data-focus="nav-today"/);
-    assert.equal(taskReads, 1);
-    assert.equal(sprintReads, 1);
+    assert.ok(taskReads > 1);
+    assert.ok(sprintReads > 1);
     assert.equal(JSON.stringify(tasks), originalData);
 
     const beforeOpen = panel.webview.html;
@@ -212,20 +237,49 @@ export async function runSprintCalendarCommandTests(): Promise<void> {
     }
     await panel.receive({ action: 'openTask', taskId: 'missing-task' });
     assert.equal(openedTasks.length, 1);
-    assert.equal(errors.at(-1), 'Task not found. Reopen the calendar to refresh it.');
-    assert.equal(panel.webview.html, beforeOpen);
+    assert.equal(errors.at(-1), 'Calendar: Task not found. Refresh the calendar.');
     assert.equal(JSON.stringify(tasks), originalData);
 
-    panel.receive({ action: 'selectSprint', sprintId: 'sprint-1' });
-    assert.match(panel.webview.html, /class="sprint-sidebar sprint-color-0"/);
+    today = '2026-09-25';
+    await panel.receive({ action: 'today' });
+    await panel.receive({ action: 'selectTask', taskId: 'task-1' });
+    assert.match(panel.webview.html, /class="details"/);
+    assert.match(panel.webview.html, /Real authored description.\nSecond line./);
+    assert.doesNotMatch(panel.webview.html, /Not the description/);
+    assert.equal(openedTasks.length, 1, 'Selecting a task must not open its file');
+    descriptionFailure = true;
+    await panel.receive({action:'selectTask',taskId:'task-1'});
+    assert.match(panel.webview.html,/Unable to read task description:.*Description file unavailable/);
+    assert.match(errors.at(-1)!,/Description file unavailable/);
+    descriptionFailure = false;
+    await panel.receive({action:'selectTask',taskId:'task-1'});
+    const snapshot = JSON.stringify({tasks,sprint:fixtureSprint});
+    failedSprintWrites.add(sprintWrites + 1);
+    await panel.receive({action:'removeTask',sprintId:'sprint-1',taskId:'task-1'});
+    assert.equal(JSON.stringify({tasks,sprint:fixtureSprint}),snapshot,'Both records must be restored after a partial sprint save');
+    assert.match(errors.at(-1)!,/Sprint save failed/);
+    failedTaskWrites.add(taskWrites + 1);
+    await panel.receive({action:'removeTask',sprintId:'sprint-1',taskId:'task-1'});
+    assert.equal(JSON.stringify({tasks,sprint:fixtureSprint}),snapshot,'A partial task save must be restored');
+    failedSprintWrites.add(sprintWrites + 1);
+    failedTaskWrites.add(taskWrites + 2);
+    await panel.receive({action:'removeTask',sprintId:'sprint-1',taskId:'task-1'});
+    assert.match(errors.at(-1)!,/Sprint save failed.*rollback.*Task save failed/);
+    assert.equal(JSON.stringify({tasks,sprint:fixtureSprint}),snapshot);
     panel.receive({ action: 'setSprintColor', sprintId: 'sprint-1', color: '#ec4899' });
     assert.equal(fixtureSprint.color, '#ec4899');
-    assert.match(panel.webview.html, /--sprint-color: #ec4899/);
+    assert.match(panel.webview.html, /--sprint:#ec4899/);
     panel.receive({ action: 'removeTask', sprintId: 'sprint-1', taskId: 'task-1' });
     assert.equal(tasks.find(task => task.id === 'task-1')?.sprint, null);
-    assert.match(panel.webview.html, /No tasks are assigned to this sprint/);
+    assert.doesNotMatch(panel.webview.html, /data-selected="task-1"/);
+    assert.equal(tasks.find(task => task.id === 'task-1')?.backlog, 'TECHNICAL');
+    assert.ok(!fixtureSprint.tasks.includes('task-1'));
     panel.receive({ action: 'assignTask', sprintId: 'sprint-1', taskId: 'task-1' });
     assert.equal(fixtureSprint.tasks.filter(id => id === 'task-1').length, 1);
+    tasks[1] = {...tasks[1],title:'Edited actual task',status:'under-review'};
+    await panel.receive({action:'refresh'});
+    assert.match(panel.webview.html,/Edited actual task/);
+    assert.match(panel.webview.html,/under-review/);
     panel.receive({ action: 'assignTask', sprintId: 'sprint-1', taskId: 'task-1', extra: true });
     assert.equal(fixtureSprint.tasks.filter(id => id === 'task-1').length, 1);
 
@@ -233,11 +287,12 @@ export async function runSprintCalendarCommandTests(): Promise<void> {
     assert.deepEqual(roots, ['/workspace', '/selected']);
     assert.equal(panels.length, 2);
     panels[1].receive({ action: 'next' });
-    assert.match(panels[1].webview.html, /data-month="2027-02"/);
-    assert.match(panel.webview.html, /data-month="2027-01"/);
+    assert.match(panels[1].webview.html, /data-month="2026-10"/);
+    assert.match(panel.webview.html, /data-month="2026-09"/);
     panel.receive({ action: 'deleteSprint', sprintId: 'sprint-1' });
-    assert.match(panel.webview.html, /No sprints are available/);
+    assert.match(panel.webview.html, /No sprint tasks in this range/);
     assert.equal(tasks.find(task => task.id === 'task-1')?.sprint, null);
+    assert.ok(refreshes >= 4,'Membership and color changes refresh the other SprintDesk views');
     panel.dispose();
     assert.equal(panel.messagesDisposed, true);
     assert.equal(panel.disposalListenerDisposed, true);

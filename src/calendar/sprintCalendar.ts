@@ -8,6 +8,11 @@ export interface CalendarTask {
   priority: Task['priority'];
   path?: string;
   sprintId: string | null;
+  backlog?: string;
+  epic?: string | null;
+  assignee?: string;
+  startDate?: string;
+  endDate?: string;
 }
 
 export interface ScheduledTask extends CalendarTask {
@@ -33,7 +38,7 @@ export interface SprintCalendar {
   backlogTasks: CalendarTask[];
 }
 
-const SPRINT_COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#f97316', '#14b8a6', '#84cc16'];
+export const SPRINT_COLORS = ['#55c2ae', '#6d9ff4', '#c598e9', '#e7a35a'];
 
 function toIsoDate(value: unknown): string | null {
   if (typeof value !== 'string') {
@@ -71,6 +76,11 @@ function toCalendarTask(task: Task): CalendarTask {
     priority: task.priority,
     path: task.path,
     sprintId: task.sprint,
+    backlog: task.backlog,
+    epic: task.epic,
+    assignee: task.assignee,
+    startDate: toIsoDate(task.startDate) ?? undefined,
+    endDate: toIsoDate(task.endDate) ?? undefined,
   };
 }
 
@@ -107,10 +117,14 @@ export function buildSprintCalendar(sprints: Sprint[], tasks: Task[]): SprintCal
     const [startDate, endDate] = parsedStartDate <= parsedEndDate
       ? [parsedStartDate, parsedEndDate]
       : [parsedEndDate, parsedStartDate];
-    const sprintTasks = sprint.tasks
-      .map((taskId) => tasksById.get(taskId))
-      .filter((task): task is Task => task !== undefined)
+    const sprintTasks = [...tasksById.values()]
+      .filter(task => task.sprint === sprint.id || task.sprint === sprint.name)
       .map(toCalendarTask);
+    for (const member of sprintTasks) {
+      member.sprintId = sprint.id;
+      const scheduled = scheduledTasks.find(task => task.id === member.id);
+      if (scheduled) { scheduled.sprintId = sprint.id; }
+    }
 
     calendarSprints.push({
       id: sprint.id,

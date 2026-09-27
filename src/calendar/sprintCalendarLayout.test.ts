@@ -5,9 +5,9 @@ import { initialCalendarState, localCalendarDate, updateCalendarState } from './
 
 const empty: SprintCalendar = { startDate: null, endDate: null, sprints: [], tasks: [], warnings: [], backlogTasks: [] };
 const september = buildMonthLayout(empty, '2026-09', '2026-09-25');
-assert.equal(september.weeks.length, 6);
+assert.equal(september.weeks.length, 5);
 assert.equal(september.weeks[0].days[0].date, '2026-08-31');
-assert.equal(september.weeks[5].days[6].date, '2026-10-11');
+assert.equal(september.weeks[4].days[6].date, '2026-10-04');
 assert.equal(september.weeks.flatMap(week => week.days).filter(day => day.isToday).length, 1);
 assert.equal(september.weeks.flatMap(week => week.days).filter(day => day.inMonth).length, 30);
 assert.equal(buildMonthLayout(empty, '2028-02', '2028-02-29').weeks.flatMap(week => week.days)
@@ -33,7 +33,7 @@ assert.equal(week.hiddenSprints, 2);
 assert.ok(week.tasks.every(segment => !segment.continuesBefore && segment.continuesAfter));
 assert.deepEqual(layout.weeks[4].tasks.map(segment => segment.lane), [0, 1, 2, 3, 4]);
 assert.ok(layout.weeks[4].tasks.every(segment => segment.column === 1 && segment.span === 7));
-assert.ok(layout.weeks[5].tasks.every(segment => segment.span === 2 && !segment.continuesAfter));
+assert.ok(layout.weeks[4].tasks.every(segment => segment.continuesAfter));
 assert.deepEqual(buildMonthLayout({ ...crowded, tasks: [...tasks].reverse(),
   sprints: [...crowded.sprints].reverse() }, '2026-09', '2026-09-25'), layout);
 

@@ -7,222 +7,121 @@ import { DataService } from '../data/DataService';
 import { Sprint, Task } from '../data/types';
 import { buildSprintCalendar } from './sprintCalendar';
 import { renderSprintCalendarHtml } from './sprintCalendarHtml';
+import { calendarDescription, calendarTaskPath } from './sprintCalendarDetails';
 import './sprintCalendarLayout.test';
+import './sprintCalendarPrototype.test';
 import { runSprintCalendarCommandTests } from './sprintCalendarCommand.test';
 
-const septemberView = { today: '2026-09-25', state: { month: '2026-09', expandedWeeks: [], focusId: null } };
-
+const view = { today: '2026-09-25', state: { month: '2026-09', expandedWeeks: [], focusId: null } };
 const task: Task = {
-  id: 'task-1',
-  number: 1,
-  code: 'SPD-1',
-  name: 'document-calendar',
-  title: 'Document Calendar',
-  type: 'doc',
-  status: 'waiting',
-  priority: 'high',
-  epic: null,
-  backlog: 'TECHNICAL',
-  sprint: 'sprint-1',
-  createdAt: '2026-01-01T00:00:00.000Z',
-  updatedAt: '2026-01-01T00:00:00.000Z',
+  id: 'task-1', number: 1, code: 'SPD-1', name: 'document-calendar', title: 'Document Calendar',
+  type: 'doc', status: 'waiting', priority: 'high', epic: null, backlog: 'TECHNICAL',
+  sprint: 'sprint-1', createdAt: '', updatedAt: '',
 };
-
 const sprint: Sprint = {
-  id: 'sprint-1',
-  number: 1,
-  title: 'Calendar Sprint',
-  name: 'calendar-sprint',
-  startDate: '25-09-2026',
-  endDate: '09-10-2026',
-  status: 'planned',
-  tasks: ['task-1', 'missing-task'],
-  createdAt: '2026-01-01T00:00:00.000Z',
-  updatedAt: '2026-01-01T00:00:00.000Z',
+  id: 'sprint-1', number: 1, title: 'Calendar Sprint', name: 'calendar-sprint',
+  startDate: '25-09-2026', endDate: '09-10-2026', status: 'planned',
+  tasks: ['task-1', 'missing-task'], createdAt: '', updatedAt: '',
 };
+const single = { ...task, startDate: '2026-09-25', endDate: '2026-09-25' };
+const calendar = buildSprintCalendar([sprint], [task]);
+assert.equal(calendar.startDate, '2026-09-25');
+assert.equal(calendar.endDate, '2026-10-09');
+assert.deepEqual(calendar.sprints[0].tasks.map(item => item.id), ['task-1']);
+assert.equal(calendar.tasks.length, 0);
+assert.match(renderSprintCalendarHtml(calendar, 'test-nonce', view), /No sprint tasks in this range/);
+const reversed = buildSprintCalendar([{ ...sprint, startDate: '2026-10-09', endDate: '2026-09-25' }], [task]);
+assert.equal(reversed.sprints[0].startDate, '2026-09-25');
+assert.equal(reversed.sprints[0].endDate, '2026-10-09');
+assert.equal(buildSprintCalendar([{ ...sprint, startDate: 'invalid' }], [task]).sprints.length, 0);
+const overlap = buildSprintCalendar([sprint, { ...sprint, id: 'long', endDate: '2026-11-01' }], [single]);
+assert.equal(overlap.endDate, '2026-11-01');
+const scheduled = buildSprintCalendar([sprint], [single]);
+assert.equal(scheduled.tasks[0].startDate, '2026-09-25');
+assert.equal(scheduled.tasks[0].sprintId, sprint.id);
+assert.equal(scheduled.tasks[0].backlog, 'TECHNICAL');
+const html = renderSprintCalendarHtml(scheduled, 'test-nonce', view);
+assert.equal((html.match(/class="card /g) ?? []).length, 1);
+assert.equal((html.match(/<time datetime=/g) ?? []).length, 35);
+assert.match(html, /aria-current="date"/);
+assert.match(html, /class="legend-item sprint-0"/);
 
-function runSprintCalendarTests(): void {
-  const calendar = buildSprintCalendar([sprint], [task]);
-  assert.deepEqual(calendar.startDate, '2026-09-25');
-  assert.deepEqual(calendar.endDate, '2026-10-09');
-  assert.deepEqual(calendar.sprints[0].tasks.map(({ id }) => id), ['task-1']);
-
-  const reversedRange = buildSprintCalendar([{ ...sprint, startDate: '2026-10-09', endDate: '2026-09-25' }], [task]);
-  assert.equal(reversedRange.sprints[0].startDate, '2026-09-25');
-  assert.equal(reversedRange.sprints[0].endDate, '2026-10-09');
-
-  const overlappingRanges = buildSprintCalendar([
-    { ...sprint, id: 'sprint-long', title: 'Long Sprint', endDate: '2026-10-20' },
-    { ...sprint, id: 'sprint-short', title: 'Short Sprint', startDate: '2026-10-01', endDate: '2026-10-05' },
-  ], [task]);
-  assert.equal(overlappingRanges.endDate, '2026-10-20');
-
-  const invalidRange = buildSprintCalendar([{ ...sprint, startDate: 'not-a-date' }], [task]);
-  assert.equal(invalidRange.sprints.length, 0);
-
-  const html = renderSprintCalendarHtml(calendar, 'test-nonce', septemberView);
-  assert.match(html, /tasks without planned dates are not shown on the calendar/);
-  assert.match(html, /Document Calendar/);
-  assert.equal(calendar.tasks.length, 0);
-  assert.doesNotMatch(html, /class="segment task-bar/);
-  assert.match(html, /class="sidebar-task sprint-color-0"/);
-
-  const singleDay: Task = { ...task, startDate: '2026-09-25', endDate: '2026-09-25' };
-  const scheduled = buildSprintCalendar([], [singleDay]);
-  assert.equal(scheduled.startDate, '2026-09-25');
-  assert.equal(scheduled.endDate, '2026-09-25');
-  assert.deepEqual(scheduled.tasks[0], {
-    id: task.id, code: task.code, title: task.title, status: task.status,
-    priority: task.priority, path: task.path, sprintId: task.sprint, startDate: '2026-09-25', endDate: '2026-09-25',
-  });
-  const singleHtml = renderSprintCalendarHtml(scheduled, 'test-nonce', septemberView);
-  assert.match(singleHtml, /class="segment task-bar col-5 span-1"/);
-  assert.match(singleHtml, /class="task-code">SPD-1<\/strong> Document Calendar/);
-  assert.match(singleHtml, /class="task-status">waiting<\/span>/);
-  assert.match(singleHtml, /role="button" data-action="openTask" data-task-id="task-1"/);
-  assert.match(singleHtml, /Click a task or press Enter or Space to open its Markdown file/);
-  assert.equal((singleHtml.match(/<time datetime=/g) ?? []).length, 42);
-  assert.match(singleHtml, /datetime="2026-08-31"/);
-  assert.match(singleHtml, /datetime="2026-10-11"/);
-  assert.match(singleHtml, /aria-current="date"/);
-  assert.equal((singleHtml.match(/class="lane task-lane"/g) ?? []).length, 6);
-  assert.equal((singleHtml.match(/class="lane sprint-lane"/g) ?? []).length, 0);
-  const sparseHtml = renderSprintCalendarHtml(
-    buildSprintCalendar([sprint], [singleDay]), 'test-nonce', septemberView,
-  );
-  assert.match(sparseHtml, /class="sprint-sidebar sprint-color-0"/);
-  assert.match(sparseHtml, /data-action="toggleTaskPicker"/);
-  assert.match(sparseHtml, /class="legend-item sprint-color-0">Calendar Sprint/);
-  assert.equal((sparseHtml.match(/class="lane task-lane"/g) ?? []).length, 6);
-  assert.equal((sparseHtml.match(/class="lane sprint-lane"/g) ?? []).length, 6);
-
-  const multiDay = { ...task, startDate: '2026-09-25', endDate: '2026-10-06' };
-  const multiHtml = renderSprintCalendarHtml(buildSprintCalendar([], [multiDay]), 'test-nonce', septemberView);
-  assert.match(multiHtml, /class="segment task-bar col-5 span-3"/);
-  assert.match(multiHtml, /class="segment task-bar col-1 span-7"/);
-  assert.match(multiHtml, /class="segment task-bar col-1 span-2"/);
-  assert.equal((multiHtml.match(/class="segment task-bar/g) ?? []).length, 3);
-  assert.equal((multiHtml.match(/Continued from previous week/g) ?? []).length, 4);
-  assert.equal((multiHtml.match(/Continues next week/g) ?? []).length, 4);
-  assert.match(multiHtml, /Sep 25, 2026 – Oct 6, 2026/);
-  assert.doesNotMatch(multiHtml, /style="/);
-  assert.match(multiHtml, /style-src 'nonce-test-nonce'/);
-
-  const overlappingTasks = buildSprintCalendar([sprint, { ...sprint, id: 'second-sprint' }], [
-    multiDay, { ...singleDay, id: 'task-2', code: 'SPD-2' },
-    { ...multiDay, id: 'task-3', code: 'SPD-3' },
-  ]);
-  assert.equal(overlappingTasks.tasks.length, 3);
-  const overlapHtml = renderSprintCalendarHtml(overlappingTasks, 'test-nonce', septemberView);
-  assert.equal((overlapHtml.match(/class="segment task-bar/g) ?? []).length, 7);
-  assert.equal((overlapHtml.match(/class="segment sprint-bar/g) ?? []).length, 6);
-
-  const outsideSprint = buildSprintCalendar([sprint], [
-    { ...multiDay, sprint: null, startDate: '2026-09-01', endDate: '2026-11-01' },
-  ]);
-  assert.equal(outsideSprint.startDate, '2026-09-01');
-  assert.equal(outsideSprint.endDate, '2026-11-01');
-
-  for (const dates of [
-    { startDate: '2026-02-29', endDate: '2026-03-01' },
-    { startDate: 'invalid', endDate: '2026-09-25' },
-    { startDate: '2026-09-26', endDate: '2026-09-25' },
-    { startDate: '2026-09-25' },
-    { endDate: '2026-09-25' },
-  ]) {
-    const invalidTask = buildSprintCalendar([], [{ ...task, ...dates }]);
-    assert.equal(invalidTask.tasks.length, 0);
-    assert.equal(invalidTask.startDate, null);
-    assert.equal(invalidTask.warnings.length, 1);
-    assert.match(renderSprintCalendarHtml(invalidTask, 'test-nonce'), /role="alert"/);
-  }
-
-  for (const dates of [
-    { startDate: '28-02-2028', endDate: '01-03-2028', column: 1, span: 3 },
-    { startDate: '2026-12-31', endDate: '2027-01-01', column: 4, span: 2 },
-    { startDate: '2026-09-21', endDate: '2026-09-27', column: 1, span: 7 },
-  ]) {
-    const rangeCalendar = buildSprintCalendar([], [{ ...task, ...dates }]);
-    const rangeHtml = renderSprintCalendarHtml(rangeCalendar, 'test-nonce', {
-      today: rangeCalendar.startDate!, state: {
-        month: rangeCalendar.startDate!.slice(0, 7), expandedWeeks: [], focusId: null,
-      },
-    });
-    assert.ok(rangeHtml.includes(`class="segment task-bar col-${dates.column} span-${dates.span}"`));
-    assert.doesNotMatch(rangeHtml, /class="continuation"/);
-  }
-
-  const malicious = '<script>alert("unsafe")</script>';
-  const escapedHtml = renderSprintCalendarHtml(buildSprintCalendar(
-    [{ ...sprint, title: malicious }],
-    [{ ...singleDay, title: malicious, code: malicious }],
-  ), 'test-nonce', septemberView);
-  assert.doesNotMatch(escapedHtml, /<script>/);
-  assert.match(escapedHtml, /&lt;script&gt;alert\(&quot;unsafe&quot;\)&lt;\/script&gt;/);
-  const warningHtml = renderSprintCalendarHtml(buildSprintCalendar([], [
-    { ...task, code: malicious, startDate: 'invalid' },
-  ]), 'test-nonce');
-  assert.doesNotMatch(warningHtml, /<script>/);
-
-  const empty = buildSprintCalendar([], [task]);
-  assert.equal(empty.startDate, null);
-  assert.equal(empty.endDate, null);
-  assert.deepEqual(empty.warnings, []);
-  const emptyHtml = renderSprintCalendarHtml(empty, 'test-nonce', septemberView);
-  assert.match(emptyHtml, /No scheduled sprints or tasks in this month view/);
-  assert.equal((emptyHtml.match(/<time datetime=/g) ?? []).length, 42);
-  assert.match(emptyHtml, /script-src 'nonce-test-nonce'/);
-  assert.match(emptyHtml, /<script nonce="test-nonce">/);
-  assert.doesNotMatch(emptyHtml, /onclick=|https?:\/\//);
-  assert.doesNotThrow(() => new Script(emptyHtml.match(/<script nonce="test-nonce">([\s\S]+)<\/script>/)![1]));
-  assert.throws(() => renderSprintCalendarHtml(empty, 'bad"nonce'), /Invalid calendar nonce/);
-
-  const crowded = buildSprintCalendar(Array.from({ length: 4 }, (_, index) => ({
-    ...sprint, id: `sprint-${index}`,
-  })), Array.from({ length: 6 }, (_, index) => ({
-    ...singleDay, id: `task-${index}`, code: `SPD-${index}`,
-  })));
-  const collapsedHtml = renderSprintCalendarHtml(crowded, 'test-nonce', septemberView);
-  assert.match(collapsedHtml, /2 more sprints · 3 more tasks/);
-  assert.match(collapsedHtml, /aria-expanded="false"/);
-  assert.equal((collapsedHtml.match(/class="segment task-bar/g) ?? []).length, 3);
-  const expandedHtml = renderSprintCalendarHtml(crowded, 'test-nonce', {
-    ...septemberView, state: { ...septemberView.state, expandedWeeks: ['2026-09-21'], focusId: 'week-2026-09-21-toggle' },
-  });
-  assert.equal((expandedHtml.match(/class="segment task-bar/g) ?? []).length, 6);
-  assert.match(expandedHtml, /aria-expanded="true"/);
-  assert.match(expandedHtml, /Collapse week/);
-  assert.match(expandedHtml, /data-focus="week-2026-09-21-toggle"/);
-  assert.match(expandedHtml, /tabindex="0"[^>]+aria-label="SPD-0: Document Calendar; waiting; high; Sep 25, 2026 – Sep 25, 2026/s);
-
-  const colored = buildSprintCalendar([{ ...sprint, color: '#ec4899' }], [singleDay]);
-  const coloredHtml = renderSprintCalendarHtml(colored, 'test-nonce', septemberView);
-  assert.match(coloredHtml, /\.sprint-color-0, \[data-sprint-color="0"\] \{ --sprint-color: #ec4899; \}/);
-  assert.match(coloredHtml, /class="color-swatch selected"[^>]+data-action="setSprintColor"[^>]+data-color="#ec4899"/);
-  assert.match(coloredHtml, /data-action="deleteSprint"/);
-  assert.match(coloredHtml, /class="task-remove" data-action="removeTask"/);
-
-  const unassigned = { ...singleDay, id: 'backlog-task', code: 'SPD-2', sprint: null };
-  const sidebarHtml = renderSprintCalendarHtml(buildSprintCalendar([{ ...sprint, tasks: [] }], [unassigned]), 'test-nonce', septemberView);
-  assert.match(sidebarHtml, /No tasks are assigned to this sprint/);
-  assert.match(sidebarHtml, /data-action="assignTask"[\s\S]+data-task-id="backlog-task"/);
-
-  const workspace = mkdtempSync(join(tmpdir(), 'sprintdesk-calendar-test-'));
-  try {
-    const service = new DataService(workspace);
-    service.saveTasks([singleDay]);
-    service.updateTask(singleDay.id, { endDate: multiDay.endDate });
-    const reloaded = new DataService(workspace).loadTasks();
-    const persisted = buildSprintCalendar([], reloaded);
-    assert.equal(persisted.tasks[0].startDate, singleDay.startDate);
-    assert.equal(persisted.tasks[0].endDate, multiDay.endDate);
-  } finally {
-    rmSync(workspace, { recursive: true });
-  }
+const multi = { ...single, endDate: '2026-10-06' };
+const multiHtml = renderSprintCalendarHtml(buildSprintCalendar([sprint], [multi]), 'test-nonce', view);
+assert.equal((multiHtml.match(/class="card /g) ?? []).length, 10);
+assert.match(multiHtml, /Sep 25, 2026 – Oct 6, 2026/);
+assert.match(multiHtml, /data-date="2026-10-04"/);
+assert.doesNotMatch(multiHtml, /style="/);
+assert.match(multiHtml, /style-src 'nonce-test-nonce'/);
+for (const dates of [
+  { startDate: '2026-02-29', endDate: '2026-03-01' },
+  { startDate: 'invalid', endDate: '2026-09-25' },
+  { startDate: '2026-09-26', endDate: '2026-09-25' },
+  { startDate: '2026-09-25' }, { endDate: '2026-09-25' },
+]) {
+  const invalid = buildSprintCalendar([], [{ ...task, ...dates }]);
+  assert.equal(invalid.tasks.length, 0);
+  assert.equal(invalid.startDate, null);
+  assert.equal(invalid.warnings.length, 1);
+  assert.match(renderSprintCalendarHtml(invalid, 'test-nonce'), /role="alert"/);
 }
-
-runSprintCalendarTests();
-void runSprintCalendarCommandTests().catch(error => {
-  console.error(error);
-  process.exitCode = 1;
+for (const dates of [
+  { startDate: '28-02-2028', endDate: '01-03-2028', start: '2028-02-28', end: '2028-03-01' },
+  { startDate: '2026-12-31', endDate: '2027-01-01', start: '2026-12-31', end: '2027-01-01' },
+]) {
+  const result = buildSprintCalendar([], [{ ...task, ...dates }]);
+  assert.equal(result.tasks[0].startDate, dates.start);
+  assert.equal(result.tasks[0].endDate, dates.end);
+}
+const malicious = '<script>alert("unsafe")</script>';
+const escaped = renderSprintCalendarHtml(buildSprintCalendar([{ ...sprint, title: malicious }],
+  [{ ...single, title: malicious, code: malicious }]), 'test-nonce', { ...view, description: malicious });
+assert.doesNotMatch(escaped, /<script>/);
+assert.match(escaped, /&lt;script&gt;alert\(&quot;unsafe&quot;\)&lt;\/script&gt;/);
+assert.doesNotThrow(() => new Script(html.match(/<script nonce="test-nonce">([\s\S]+)<\/script>/)![1]));
+assert.throws(() => renderSprintCalendarHtml(scheduled, 'bad"nonce'), /Invalid calendar nonce/);
+assert.doesNotMatch(html, /onclick=|https?:\/\//);
+const crowded = buildSprintCalendar([sprint], Array.from({ length: 6 }, (_, index) => ({ ...single, id: `task-${index}` })));
+const collapsed = renderSprintCalendarHtml(crowded, 'test-nonce', view);
+assert.match(collapsed, /3 more tasks/);
+assert.equal((collapsed.match(/class="card /g) ?? []).length, 3);
+const expanded = renderSprintCalendarHtml(crowded, 'test-nonce', {
+  ...view, state: { ...view.state, expandedWeeks: ['2026-09-21'], focusId: 'week-2026-09-21-toggle' },
 });
+assert.equal((expanded.match(/class="card /g) ?? []).length, 6);
+assert.match(expanded, /Collapse week/);
+const colored = renderSprintCalendarHtml(buildSprintCalendar([{ ...sprint, color: '#ec4899' }], [single]), 'test-nonce', view);
+assert.match(colored, /--sprint:#ec4899/);
+assert.match(colored, /swatch-ec4899 selected/);
+assert.match(colored, /data-action="deleteSprint"/);
+assert.match(colored, /data-action="removeTask"/);
+const legacy = buildSprintCalendar([sprint], [{ ...single, sprint: sprint.name }]);
+assert.equal(legacy.tasks[0].sprintId, sprint.id);
+assert.equal(legacy.sprints[0].tasks.length, 1);
+assert.equal(buildSprintCalendar([sprint], [{ ...single, sprint: null }]).sprints[0].tasks.length, 0);
+
+assert.equal(calendarDescription('---\ntitle: Test\n---\n# Test\n## 📋 Description\nFirst line.\nSecond line.\n\n## Notes\nNo.'), 'First line.\nSecond line.');
+assert.equal(calendarDescription('## Description\r\nActual text\r\n## Notes\r\nNo'), 'Actual text');
+assert.equal(calendarDescription('## Description\n\n## Notes\nNo'), '');
+assert.equal(calendarTaskPath('/workspace/Tasks', '[ABC]_task.md'), '/workspace/Tasks/[ABC]_task.md');
+assert.throws(() => calendarTaskPath('/workspace/Tasks', '../../outside.md'), /inside/);
+assert.throws(() => calendarTaskPath('/workspace/Tasks', 'a.md', '/secrets.md'), /inside/);
+assert.throws(() => calendarTaskPath('/workspace/Tasks', 'script.js'), /inside/);
+
+const workspace = mkdtempSync(join(tmpdir(), 'sprintdesk-calendar-test-'));
+try {
+  const service = new DataService(workspace);
+  service.saveTasks([single]);
+  service.updateTask(single.id, { endDate: multi.endDate });
+  const persisted = buildSprintCalendar([], new DataService(workspace).loadTasks());
+  assert.equal(persisted.tasks[0].startDate, single.startDate);
+  assert.equal(persisted.tasks[0].endDate, multi.endDate);
+  service.saveSprints([sprint, {...sprint,id:'another-sprint',name:'another-sprint',color:'#6d9ff4'}]);
+  service.updateSprint(sprint.id,{color:'#c598e9'});
+  const storedSprints = new DataService(workspace).loadSprints();
+  assert.equal(storedSprints.find(item => item.id === sprint.id)?.color,'#c598e9');
+  assert.equal(storedSprints.find(item => item.id === 'another-sprint')?.color,'#6d9ff4');
+} finally {
+  rmSync(workspace, { recursive: true });
+}
+void runSprintCalendarCommandTests().catch(error => { console.error(error); process.exitCode = 1; });

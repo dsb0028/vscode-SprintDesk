@@ -5,6 +5,7 @@ export interface CalendarViewState {
   expandedWeeks: string[];
   focusId: string | null;
   selectedSprintId?: string | null;
+  selectedTaskId?: string | null;
 }
 
 export function localCalendarDate(now = new Date()): string {
@@ -49,5 +50,6 @@ export function updateCalendarState(
     }
     month = date.toISOString().slice(0, 7);
   }
-  return { month, expandedWeeks: [], focusId: `nav-${data.action}`, selectedSprintId: state.selectedSprintId };
+  return { month, expandedWeeks: [], focusId: `nav-${data.action}`,
+    selectedSprintId: state.selectedSprintId, selectedTaskId: null };
 }

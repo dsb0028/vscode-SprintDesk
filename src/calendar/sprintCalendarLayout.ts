@@ -38,7 +38,11 @@ export function monthDays(month: string): string[] {
   }
   const cursor = new Date(`${month}-01T00:00:00Z`);
   cursor.setUTCDate(cursor.getUTCDate() - (cursor.getUTCDay() + 6) % 7);
-  return Array.from({ length: 42 }, () => {
+  const end = new Date(`${month}-01T00:00:00Z`);
+  end.setUTCMonth(end.getUTCMonth() + 1);
+  end.setUTCDate(0);
+  const length = Math.ceil((Math.round((end.getTime() - cursor.getTime()) / 86400000) + 1) / 7) * 7;
+  return Array.from({ length }, () => {
     const day = cursor.toISOString().slice(0, 10);
     cursor.setUTCDate(cursor.getUTCDate() + 1);
     return day;
