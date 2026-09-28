@@ -37,6 +37,20 @@ A productivity extension for managing tasks, epics, backlogs, and sprints direct
 
 ---
 
+## Backlog priority groups
+
+Expand a backlog in the **Backlogs** pane to see **High**, **Medium**, and
+**Low** priority groups, in that order. All three groups remain available even
+when empty. Expand a group to open or drag its tasks as before; drop tasks on
+the backlog itself, not on a priority heading.
+
+Grouping uses stored task priority and backlog membership. It does not filter
+out completed tasks or tasks assigned to sprints, change task metadata, or
+alter the status groups in the **Tasks** pane. Refresh SprintDesk after editing
+priority or backlog membership to update the displayed groups.
+
+Run the focused provider regression tests with `npm run test:backlog-priorities`.
+
 ## Task Calendar
 
 Run **SprintDesk: Show Sprint Calendar** from the Command Palette or a sprint's

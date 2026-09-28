@@ -8,8 +8,13 @@ import matter from 'gray-matter';
 import { getBacklogPath, getTasksPath } from '../utils/backlogUtils';
 import { getTaskPath, removeEmojiFromTaskLabel } from '../utils/taskUtils';
 import { getDataService } from '../data/DataService';
-import { Task, Backlog } from '../data/types';
+import { Task } from '../data/types';
 
+const PRIORITY_GROUPS: ReadonlyArray<{ priority: Task['priority']; label: string }> = [
+  { priority: 'high', label: 'High' },
+  { priority: 'medium', label: 'Medium' },
+  { priority: 'low', label: 'Low' },
+];
 
 export class BacklogsTreeItem extends vscode.TreeItem {
   constructor(
@@ -21,11 +26,17 @@ export class BacklogsTreeItem extends vscode.TreeItem {
     public readonly sourceBacklogPath?: string,
     public readonly backlogId?: string,
     public readonly taskId?: string,
-    taskCount?: number
+    taskCount?: number,
+    public readonly priority?: Task['priority']
   ) {
     super(label, collapsibleState);
 
-    if (filePath) {
+    if (priority && backlogId) {
+      this.id = `backlog-priority:${backlogId}:${priority}`;
+      this.contextValue = 'backlogPriorityGroup';
+      this.iconPath = new vscode.ThemeIcon('folder');
+      this.tooltip = `${label} priority tasks`;
+    } else if (filePath) {
       // Setup backlog item
       this.contextValue = 'backlog';
       this.resourceUri = vscode.Uri.file(filePath);
@@ -41,6 +52,7 @@ export class BacklogsTreeItem extends vscode.TreeItem {
     } else if (taskPath) {
       // Setup task item
       this.contextValue = 'task';
+      this.resourceUri = vscode.Uri.file(taskPath);
 
       try {
 
@@ -215,59 +227,36 @@ private async addTaskToBacklog(backlogPath: string, taskPath: string): Promise<v
   private async removeTaskFromBacklog(backlogPath: string, taskPath: string): Promise<void> {
     backlogService.removeTaskFromBacklog(backlogPath, taskPath);
   }
-  private async getTasksFromBacklogName(backlogName: string): Promise<BacklogsTreeItem[]> {
-    const treeItems = backlogService.getTasksFromBacklog(backlogName);
-    const backlogs = backlogService.getBacklogs('');
-    const backlog = backlogs.find(b => b.name === backlogName);
-    const backlogId = backlog?.id;
-    
-    return treeItems.map(item => {
+  private getPriorityTasks(backlogId: string, priority: Task['priority']): BacklogsTreeItem[] {
+    const dataService = getDataService(this.getWorkspaceRoot());
+    const tasks = dataService.getTasksByBacklog(backlogId);
+    return tasks.filter(task => task.priority === priority).map(task => {
+      const taskPath = path.join(dataService.getTasksDir(), dataService.getTaskFilename(task));
       const treeItem = new BacklogsTreeItem(
-        item.label,
+        task.title,
         vscode.TreeItemCollapsibleState.None,
         [],
         undefined,
-        item.path,
+        taskPath,
         undefined,
         backlogId,
-        item.id
+        task.id
       );
       treeItem.command = {
         command: 'vscode.open',
         title: 'Open Task',
-        arguments: [vscode.Uri.file(item.path)]
+        arguments: [vscode.Uri.file(taskPath)]
       };
-      treeItem.tooltip = `Task: ${item.label}\nPath: ${item.path}`;
-      return treeItem;
-    });
-  }
-  private async getTasksFromBacklogId(backlogId: string): Promise<BacklogsTreeItem[]> {
-    const treeItems = backlogService.getTasksFromBacklogById(backlogId);
-    return treeItems.map(item => {
-      const treeItem = new BacklogsTreeItem(
-        item.label,
-        vscode.TreeItemCollapsibleState.None,
-        [],
-        undefined,
-        item.path,
-        undefined,
-        backlogId,
-        item.id
-      );
-      treeItem.command = {
-        command: 'vscode.open',
-        title: 'Open Task',
-        arguments: [vscode.Uri.file(item.path)]
-      };
-      treeItem.tooltip = `Task: ${item.label}\nPath: ${item.path}`;
+      treeItem.tooltip = `Task: ${task.title}\nPath: ${taskPath}`;
       return treeItem;
     });
   }
   // handle drag and drop
   handleDrag(source: readonly BacklogsTreeItem[], dataTransfer: vscode.DataTransfer): void {
     try {
-      if (source.length > 0) {
-        const taskItem = source[0];
+      const taskItem = source.find(item =>
+        item.contextValue === 'task' && item.taskId && item.taskPath);
+      if (taskItem) {
 
         const taskData = {
           _id: taskItem.taskId,
@@ -413,11 +402,26 @@ private async addTaskToBacklog(backlogPath: string, taskPath: string): Promise<v
       return this.getBacklogsTree(workspaceRoot);
     }
 
-    if (element.filePath) {
-      if (element.backlogId) {
-        return this.getTasksFromBacklogId(element.backlogId);
-      }
-      return this.getTasksFromBacklogName(path.basename(element.filePath));
+    if (element.priority && element.backlogId) {
+      return this.getPriorityTasks(element.backlogId, element.priority);
+    }
+
+    if (element.filePath && element.contextValue === 'backlog') {
+      const dataService = getDataService(workspaceRoot);
+      const backlog = dataService.getBacklog(element.backlogId || path.basename(element.filePath));
+      if (!backlog) { return []; }
+      return PRIORITY_GROUPS.map(group => new BacklogsTreeItem(
+        group.label,
+        vscode.TreeItemCollapsibleState.Collapsed,
+        [],
+        undefined,
+        undefined,
+        undefined,
+        backlog.id,
+        undefined,
+        undefined,
+        group.priority
+      ));
     }
 
     return [];
