@@ -209,6 +209,11 @@
         "icon": "$(person-add)"
       },
       {
+        "command": "sprintdesk.registerHumanReviewer",
+        "title": "SprintDesk: Register Human Reviewer",
+        "icon": "$(person-add)"
+      },
+      {
         "command": "sprintdesk.createTeam",
         "title": "SprintDesk: Create Team",
         "icon": "$(new-folder)"

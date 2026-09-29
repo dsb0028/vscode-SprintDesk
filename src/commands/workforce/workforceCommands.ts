@@ -53,6 +53,39 @@ export function registerWorkforceCommands(context: vscode.ExtensionContext, prov
       vscode.window.showInformationMessage(`Employee ${employee.name} added`);
     }),
 
+    vscode.commands.registerCommand('sprintdesk.registerHumanReviewer', async () => {
+      const reviewerId = await vscode.window.showInputBox({
+        prompt: 'Enter reviewer ID',
+        placeHolder: 'e.g., jane-doe',
+        validateInput: value => value.trim()
+          ? undefined
+          : 'Reviewer ID is required.'
+      });
+      if (reviewerId === undefined) {
+        return;
+      }
+
+      const name = await vscode.window.showInputBox({
+        prompt: 'Enter reviewer name',
+        placeHolder: 'e.g., Jane Doe',
+        validateInput: value => value.trim()
+          ? undefined
+          : 'Reviewer name is required.'
+      });
+      if (name === undefined) {
+        return;
+      }
+
+      try {
+        const reviewer = workforceService.registerHumanReviewer({ reviewerId, name });
+        provider.refresh();
+        vscode.window.showInformationMessage(`Human reviewer ${reviewer.name} registered`);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Unable to register human reviewer';
+        vscode.window.showErrorMessage(`Failed to register human reviewer: ${message}`);
+      }
+    }),
+
     vscode.commands.registerCommand('sprintdesk.createTeam', async () => {
       const name = await vscode.window.showInputBox({ prompt: 'Enter team name' });
       if (!name) return;

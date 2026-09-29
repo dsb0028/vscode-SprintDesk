@@ -120,6 +120,11 @@ or oversized, or the normalized ID or human name is already registered.
 Registration outcomes are recorded in the audit store. Listing and removal are
 intentionally out of scope for this command.
 
+The extension also exposes **SprintDesk: Register Human Reviewer** in the
+VS Code Command Palette. It prompts for the reviewer ID and name, uses the
+same validation and storage as the MCP tool, and does not require the
+MCP-only `sprintdesk.reviewerRegistrationEnabled` setting.
+
 ### History Tools
 | Tool | Description |
 |------|-------------|
