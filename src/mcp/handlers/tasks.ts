@@ -1,4 +1,5 @@
 import * as taskService from '../../services/taskService';
+import * as workforceService from '../../services/workforce/workforceService';
 import { getStores } from '../../data/stores';
 import { HumanVerification, Task } from '../../data/types';
 import { Handler, HandlerResult, res, getWs, getDs, findTask, resolveAgent, recordAudit } from './helpers';
@@ -221,15 +222,14 @@ async function handle_sprintdesk_tasksComplete(args: any): Promise<HandlerResult
 }
 
 function getHumanVerification(args: any): HumanVerification | undefined {
-  const reviewerId = args.humanVerification?.reviewerId;
-  const reviewer = resolveAgent(reviewerId);
-  if (!reviewerId || !reviewer || reviewer.role !== 'human') {
+  const reviewer = workforceService.findHumanReviewer(args.humanVerification?.reviewerId);
+  if (!reviewer) {
     return undefined;
   }
 
   return {
     reviewerId: reviewer.id,
-    reviewerName: reviewer.name,
+    reviewerName: reviewer.displayName,
     approvedAt: new Date().toISOString(),
     ...(args.humanVerification.notes ? { notes: args.humanVerification.notes } : {}),
   };

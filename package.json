@@ -34,6 +34,7 @@
     "test:task-statuses": "npm run compile-tests && node out/providers/taskStatusGroups.test.js",
     "test:backlog-priorities": "npm run compile-tests && node out/providers/backlogPriorities.test.js",
     "test:mcp": "npm run compile-tests && node out/mcp/core.test.js",
+    "test:reviewers": "npm run compile-tests && node out/data/stores/ReviewerStore.test.js",
     "watch-tests": "tsc -p . -w --outDir out --noEmit false",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src --ext ts",

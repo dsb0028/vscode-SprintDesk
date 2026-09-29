@@ -161,7 +161,6 @@ async function handle_sprintdesk_registerHumanReviewer(args: any): Promise<Handl
       action: 'register',
       targetType: 'human-reviewer',
       targetId: reviewer.id,
-      details: { reviewerName: reviewer.name },
     });
     return res(JSON.stringify(reviewer, null, 2));
   } catch (error: unknown) {

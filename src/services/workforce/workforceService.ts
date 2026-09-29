@@ -1,5 +1,12 @@
 import * as crypto from 'crypto';
-import { getStores } from '../../data/stores';
+import {
+  getStores,
+  ReviewerRecord,
+  REVIEWER_DISPLAY_NAME_MAX_LENGTH,
+  REVIEWER_ID_MAX_LENGTH,
+  normalizeReviewerDisplayName,
+  normalizeReviewerId
+} from '../../data/stores';
 import { Employee, EmployeeTeam } from '../../data/types';
 import * as teamService from '../team/teamService';
 
@@ -83,48 +90,71 @@ export function addEmployee(input: {
   return employee;
 }
 
+/** Lists every registered human reviewer from the reviewer registry. */
+export function listHumanReviewers(): ReviewerRecord[] {
+  return getStores().reviewers.list();
+}
+
+/** Resolves a registered human reviewer by normalized id or exact display name. */
+export function findHumanReviewer(idOrDisplayName?: string): ReviewerRecord | undefined {
+  return getStores().reviewers.find(idOrDisplayName);
+}
+
+/**
+ * Registers a human reviewer in the reviewer registry.
+ *
+ * The reviewer registry is authoritative for reviewer identity and human
+ * verification, and is maintained independently of the workforce employee
+ * registry. Being a human employee never confers reviewer authority.
+ *
+ * A companion employee record is added only when no employee already owns the
+ * reviewer id, so existing workforce views list the reviewer. An existing
+ * employee is reused untouched and is never repurposed, renamed, or removed.
+ * Errors never disclose reviewer ids or display names.
+ */
 export function registerHumanReviewer(input: {
   reviewerId: string;
   name: string;
 }): Employee {
-  const reviewerId = input.reviewerId.trim();
-  const name = input.name.trim().replace(/\s+/g, ' ');
-  if (!reviewerId || reviewerId.length > 128) {
-    throw new Error('reviewerId must be between 1 and 128 characters');
+  const reviewerId = normalizeReviewerId(input.reviewerId);
+  const name = normalizeReviewerDisplayName(input.name);
+  if (!reviewerId || reviewerId.length > REVIEWER_ID_MAX_LENGTH) {
+    throw new Error(`reviewerId must be between 1 and ${REVIEWER_ID_MAX_LENGTH} characters`);
   }
-  if (!name || name.length > 200) {
-    throw new Error('name must be between 1 and 200 characters');
-  }
-
-  const existing = getStores().employees.getById(reviewerId);
-  if (existing) {
-    throw new Error(`Reviewer already registered: ${reviewerId}`);
-  }
-  if (teamService.getAgents().some(agent => agent.id === reviewerId)) {
-    throw new Error(`Reviewer ID is already in use: ${reviewerId}`);
+  if (!name || name.length > REVIEWER_DISPLAY_NAME_MAX_LENGTH) {
+    throw new Error(`name must be between 1 and ${REVIEWER_DISPLAY_NAME_MAX_LENGTH} characters`);
   }
 
-  const duplicateName = getStores().employees.loadAll().find(
-    employee => employee.role === 'human' && employee.name.trim() === name,
-  );
-  if (duplicateName) {
-    throw new Error(`Reviewer already registered: ${duplicateName.id}`);
+  const stores = getStores();
+  const conflictingEmployee = stores.employees.getById(reviewerId);
+  if (conflictingEmployee && conflictingEmployee.role !== 'human') {
+    throw new Error('Reviewer ID is already in use by a non-human employee');
   }
-  if (teamService.getAgents().some(agent => agent.name.trim() === name)) {
-    throw new Error(`Reviewer name is already in use: ${name}`);
+  const agents = teamService.getAgents();
+  if (agents.some(agent => agent.id === reviewerId)) {
+    throw new Error('Reviewer ID is already in use by an agent');
+  }
+  if (agents.some(agent => agent.name.trim() === name)) {
+    throw new Error('Reviewer name is already in use by an agent');
   }
 
+  // Duplicate reviewer ids and names are rejected inside the registry lock.
+  const reviewer = stores.reviewers.register({ reviewerId, displayName: name });
+  return conflictingEmployee || addReviewerEmployee(reviewer);
+}
+
+function addReviewerEmployee(reviewer: ReviewerRecord): Employee {
   const now = new Date().toISOString();
-  const reviewer: Employee = {
-    id: reviewerId,
-    name,
+  const employee: Employee = {
+    id: reviewer.id,
+    name: reviewer.displayName,
     role: 'human',
     status: 'idle',
     createdAt: now,
     updatedAt: now,
   };
-  getStores().employees.add(reviewer);
-  return reviewer;
+  getStores().employees.add(employee);
+  return employee;
 }
 
 export function updateEmployee(

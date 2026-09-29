@@ -367,7 +367,8 @@ function getProjectContext(ds: NonNullable<ReturnType<typeof getDs>>, refreshedA
       backlogs: backlogs.length,
       runs: stores.runs.count(),
       events: stores.events.count(),
-      employees: stores.employees.count()
+      employees: stores.employees.count(),
+      reviewers: stores.reviewers.count()
     },
     tasksByStatus: taskStatusCounts,
     backlogTaskCounts: backlogs.map(backlog => ({

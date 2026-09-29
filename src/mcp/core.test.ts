@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { load } from 'js-yaml';
+import * as workforceService from '../services/workforce/workforceService';
 import { setFileSystem, setHost } from '../host';
 import { NodeFileSystem } from '../host/NodeFileSystem';
 import { IHost } from '../host/IHost';
@@ -38,6 +40,7 @@ async function runMcpCoreTests(): Promise<void> {
   const tasksDirectory = join(workspace, '.SprintDesk', 'Tasks');
   const tasksPath = join(dataDirectory, 'tasks.yml');
   const backlogsPath = join(dataDirectory, 'backlogs.yml');
+  const reviewersPath = join(dataDirectory, 'reviewers.yml');
 
   try {
     rmSync(workspace, { recursive: true, force: true });
@@ -153,6 +156,13 @@ Keep this note.
     assert.equal(registeredReviewer.id, 'reviewer-2');
     assert.equal(registeredReviewer.name, 'Second Reviewer');
     assert.match(readFileSync(join(workforceDirectory, 'employees.yml'), 'utf8'), /id: reviewer-2/);
+    // The registry is the shared persistence boundary and migrates the legacy human record once.
+    assert.deepEqual(load(readFileSync(reviewersPath, 'utf8')), {
+      reviewers: [{ id: 'reviewer-2', displayName: 'Second Reviewer' }],
+    });
+    // The pre-existing human employee is left untouched and gains no reviewer authority.
+    assert.match(readFileSync(join(workforceDirectory, 'employees.yml'), 'utf8'), /id: reviewer-1/);
+    assert.equal(workforceService.findHumanReviewer('reviewer-1'), undefined);
 
     const duplicateRegistration = await handleRequest({
       jsonrpc: '2.0',
@@ -211,6 +221,43 @@ Keep this note.
     assert.equal(missingReviewResponse.result.isError, true);
     assert.match(missingReviewResponse.result.content[0].text, /human verification/);
 
+    const registryBeforeUnknownReviewer = readFileSync(reviewersPath, 'utf8');
+    const unknownReviewerResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 20,
+      method: 'tools/call',
+      params: {
+        name: 'sprintdesk_updateTask',
+        arguments: { taskId: 'SPD-1', status: 'done', humanVerification: { reviewerId: 'reviewer-404' } },
+      },
+    });
+    assert.equal(unknownReviewerResponse.result.isError, true);
+    assert.match(unknownReviewerResponse.result.content[0].text, /human verification/);
+    assert.equal(readFileSync(reviewersPath, 'utf8'), registryBeforeUnknownReviewer);
+    assert.equal(JSON.parse(
+      (await handleRequest({
+        jsonrpc: '2.0',
+        id: 21,
+        method: 'tools/call',
+        params: { name: 'sprintdesk_getTask', arguments: { taskId: 'SPD-1' } },
+      })).result.content[0].text,
+    ).status, 'under-review');
+
+    // A human employee that was never registered as a reviewer cannot verify a task.
+    const employeeReviewerResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 22,
+      method: 'tools/call',
+      params: {
+        name: 'sprintdesk_updateTask',
+        arguments: { taskId: 'SPD-1', status: 'done', humanVerification: { reviewerId: 'reviewer-1' } },
+      },
+    });
+    assert.equal(employeeReviewerResponse.result.isError, true);
+    assert.match(employeeReviewerResponse.result.content[0].text, /human verification/);
+    assert.equal(readFileSync(reviewersPath, 'utf8'), registryBeforeUnknownReviewer);
+
+
     const doneResponse = await handleRequest({
       jsonrpc: '2.0',
       id: 8,
@@ -262,6 +309,7 @@ Keep this note.
       runs: 0,
       events: 0,
       employees: 2,
+      reviewers: 1,
     });
     assert.deepEqual(httpSnapshot.backlogTaskCounts, [
       { id: 'technical', title: 'TECHNICAL', taskCount: 1 },
@@ -308,6 +356,7 @@ Keep this note.
       runs: 0,
       events: 0,
       employees: 2,
+      reviewers: 1,
     });
     assert.equal(refreshCalls, 1);
 
@@ -405,6 +454,29 @@ Keep this note.
     const repeatedEmptyStatusTask = JSON.parse(repeatedEmptyStatusResponse.result.content[0].text);
     assert.equal(repeatedEmptyStatusTask.status, 'waiting');
     assert.equal(readFileSync(taskThreePath, 'utf8'), emptyTaskTemplate);
+
+    // Registering that employee as a reviewer reuses its record without repurposing it.
+    const employeesBeforePromotion = readFileSync(join(workforceDirectory, 'employees.yml'), 'utf8');
+    const promotionResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 23,
+      method: 'tools/call',
+      params: {
+        name: 'sprintdesk_registerHumanReviewer',
+        arguments: { reviewerId: 'reviewer-1', name: 'Human Reviewer' },
+      },
+    });
+    const promotedReviewer = JSON.parse(promotionResponse.result.content[0].text);
+    assert.equal(promotedReviewer.id, 'reviewer-1');
+    assert.equal(promotedReviewer.name, 'Human Reviewer');
+    assert.equal(readFileSync(join(workforceDirectory, 'employees.yml'), 'utf8'), employeesBeforePromotion);
+    assert.deepEqual(load(readFileSync(reviewersPath, 'utf8')), {
+      reviewers: [
+        { id: 'reviewer-2', displayName: 'Second Reviewer' },
+        { id: 'reviewer-1', displayName: 'Human Reviewer' },
+      ],
+    });
+    assert.equal(workforceService.findHumanReviewer('reviewer-1')?.displayName, 'Human Reviewer');
 
     const errorResult = await handleRequest({
       jsonrpc: '2.0',

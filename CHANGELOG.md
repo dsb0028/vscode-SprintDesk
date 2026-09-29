@@ -5,7 +5,22 @@ All notable changes to the "vscode-async-postmessaging" extension will be docume
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
- 
+
+### Added
+
+- **Reviewer registry:** `.SprintDesk/data/reviewers.yml` is now the authoritative source for
+  SprintDesk human reviewers, with a strict `reviewers: [{ id, displayName }]` schema, an explicit
+  `reviewers: []` empty state, and stable insertion-order listing.
+- Registration, listing (`counts.reviewers` in `sprintdesk_projectContext` and `sprintdesk_refresh`),
+  and human-verification lookup now share the `ReviewerStore` persistence boundary.
+- Reviewer authority is tracked independently of `.SprintDesk/workforce/employees.yml`;
+  registering a reviewer never deletes, rewrites, or repurposes an employee record, and an
+  unregistered `role: human` employee cannot approve a task.
+- Owner-only permissions, symlink rejection, atomic writes, and cross-process locking for the
+  registry. Reviewer IDs and display names no longer appear in reviewer error messages or audit
+  entries.
+- `npm run test:reviewers` covering registry schema, security, and locking behavior.
+
 - Initial release
 
 ## [0.4.0] - 2026-09-13

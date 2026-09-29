@@ -4,3 +4,8 @@ node_modules
 .vscode-test/
 *.vsix
 releases/
+
+# Reviewer registry: local, owner-only, never source controlled
+.SprintDesk/data/reviewers.yml
+.SprintDesk/data/reviewers.yml.lock
+.SprintDesk/data/reviewers.yml.*.tmp

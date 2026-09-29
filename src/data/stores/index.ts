@@ -5,6 +5,7 @@ import { EventStore } from './EventStore';
 import { AuditStore } from './AuditStore';
 import { EmployeeStore } from './EmployeeStore';
 import { EmployeeTeamStore } from './EmployeeTeamStore';
+import { ReviewerStore } from './ReviewerStore';
 import {
   ProjectMcpManifest,
   defaultProjectMcpManifest,
@@ -19,6 +20,7 @@ export interface Stores {
   audit: AuditStore;
   employees: EmployeeStore;
   teams: EmployeeTeamStore;
+  reviewers: ReviewerStore;
 }
 
 export interface ProjectMcpFacade {
@@ -45,7 +47,8 @@ export function getStores(workspaceRoot?: string): Stores {
       events: new EventStore(root),
       audit: new AuditStore(root),
       employees: new EmployeeStore(root),
-      teams: new EmployeeTeamStore(root)
+      teams: new EmployeeTeamStore(root),
+      reviewers: new ReviewerStore(root)
     };
     activeStoresRoot = root;
   }
@@ -63,3 +66,11 @@ export function getProjectMcpFile(workspaceRoot?: string): ProjectMcpFacade {
 }
 
 export { ProjectMcpManifest } from './projectMcp';
+export {
+  ReviewerRecord,
+  ReviewerStore,
+  REVIEWER_DISPLAY_NAME_MAX_LENGTH,
+  REVIEWER_ID_MAX_LENGTH,
+  normalizeReviewerDisplayName,
+  normalizeReviewerId
+} from './ReviewerStore';

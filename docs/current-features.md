@@ -68,6 +68,13 @@
 - Project status monitoring
 - Project organization tools
 
+### ✅ Human Reviewer Registry
+- Authoritative `.SprintDesk/data/reviewers.yml` registry with a strict `{ id, displayName }` schema
+- Shared persistence boundary for registration, listing, and human-verification lookup
+- Maintained independently of the employee registry, with no migration between them
+- Owner-only permissions, symlink rejection, atomic writes, and cross-process locking
+- See [Reviewer Registry](reviewer-registry.md)
+
 ## Technical Features
 
 ### 🛠 System Integration
