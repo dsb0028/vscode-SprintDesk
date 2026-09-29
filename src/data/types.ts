@@ -27,9 +27,27 @@ export interface Task {
   runId?: string;
   attempts?: number;
   humanVerification?: HumanVerification;
+  review?: TaskReview;
 }
 
 export type TaskStatus = 'waiting' | 'in-progress' | 'under-review' | 'done' | 'blocked' | 'cancelled';
+
+export type ReviewResult = 'met' | 'needs work';
+export type ReviewSummary = 'pending' | 'accepted' | 'further work required';
+
+export interface TaskReviewCriterion {
+  criterion: string;
+  result?: ReviewResult;
+  reviewerId?: string;
+  verifiedAt?: string;
+}
+
+export interface TaskReview {
+  summary: ReviewSummary;
+  reviewerId?: string;
+  reviewedAt?: string;
+  criteria: TaskReviewCriterion[];
+}
 
 export interface HumanVerification {
   reviewerId: string;

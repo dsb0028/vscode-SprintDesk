@@ -1,7 +1,8 @@
 import * as taskService from '../../services/taskService';
 import * as workforceService from '../../services/workforce/workforceService';
 import { getStores } from '../../data/stores';
-import { HumanVerification, Task } from '../../data/types';
+import { HumanVerification, ReviewResult, Task, TaskReview } from '../../data/types';
+import { DataService } from '../../data/DataService';
 import { Handler, HandlerResult, res, getWs, getDs, findTask, resolveAgent, recordAudit } from './helpers';
 
 async function handle_sprintdesk_tasksAssign(args: any): Promise<HandlerResult> {
@@ -105,10 +106,27 @@ async function handle_sprintdesk_updateTask(args: any): Promise<HandlerResult> {
       updates.humanVerification = humanVerification;
       updates.workStatus = 'done';
     }
+    if (args.status === 'under-review') {
+      const review = buildReviewHandoff(task, ds);
+      updates.review = review;
+    }
     updates.status = args.status;
   }
   if (args.priority) updates.priority = args.priority;
   if (args.type) updates.type = args.type;
+  if (args.review !== undefined) {
+    if (args.status) {
+      return res('Review results cannot change the task status', true);
+    }
+    if (task.status !== 'under-review') {
+      return res('Only under-review tasks accept review results', true);
+    }
+    const review = recordTaskReview(task, args.review);
+    if (typeof review === 'string') {
+      return res(review, true);
+    }
+    updates.review = review;
+  }
 
   if (Object.keys(updates).length === 0) {
     return res('No updates provided', true);
@@ -128,6 +146,47 @@ async function handle_sprintdesk_updateTask(args: any): Promise<HandlerResult> {
   }
 
   return res(JSON.stringify(updatedTask, null, 2));
+}
+
+function buildReviewHandoff(task: Task, ds: DataService): TaskReview {
+  if (task.review?.criteria.length) {
+    return task.review;
+  }
+  return {
+    summary: 'pending',
+    criteria: ds.getTaskAcceptanceCriteria(task).map(criterion => ({ criterion })),
+  };
+}
+
+function recordTaskReview(task: Task, input: any): TaskReview | string {
+  const reviewer = workforceService.findHumanReviewer(input?.reviewerId);
+  if (!reviewer) {
+    return 'Review requires a registered human reviewer';
+  }
+  const expected = task.review?.criteria;
+  if (!expected?.length || !Array.isArray(input.criteria) || input.criteria.length !== expected.length) {
+    return 'Review must provide a result for every acceptance criterion';
+  }
+  for (let index = 0; index < expected.length; index += 1) {
+    const entry = input.criteria[index];
+    if (!entry || entry.criterion !== expected[index].criterion
+      || (entry.result !== 'met' && entry.result !== 'needs work')) {
+      return 'Review must provide each acceptance criterion in order with result met or needs work';
+    }
+  }
+  const reviewedAt = new Date().toISOString();
+  return {
+    summary: input.criteria.every((entry: { result: ReviewResult }) => entry.result === 'met')
+      ? 'accepted' : 'further work required',
+    reviewerId: reviewer.id,
+    reviewedAt,
+    criteria: expected.map((entry, index) => ({
+      criterion: entry.criterion,
+      result: input.criteria[index].result,
+      reviewerId: reviewer.id,
+      verifiedAt: reviewedAt,
+    })),
+  };
 }
 
 async function handle_sprintdesk_deleteTask(args: any): Promise<HandlerResult> {
@@ -205,7 +264,11 @@ async function handle_sprintdesk_tasksComplete(args: any): Promise<HandlerResult
   const task = findTask(ds, args.taskId);
   if (!task) return res(`Task not found: ${args.taskId}`, true);
 
-  ds.updateTask(task.id, { status: 'under-review', workStatus: 'review' });
+  ds.updateTask(task.id, {
+    status: 'under-review',
+    workStatus: 'review',
+    review: buildReviewHandoff(task, ds),
+  });
 
   if (args.runId) {
     getStores().runs.update(args.runId as string, {

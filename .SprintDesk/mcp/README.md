@@ -54,6 +54,36 @@ curl http://localhost:3847/health
 | `sprintdesk_listTasks` | List all tasks (with optional status filter) |
 | `sprintdesk_searchTasks` | Search tasks by title |
 
+### Reviewing an under-review task
+
+When a task enters `under-review`, SprintDesk reads its Markdown acceptance
+criteria (plain or checkbox bullets, including wrapped lines), stores one
+pending review entry per criterion, and adds a Review Handoff section to the
+task file. Use `sprintdesk_getTask` to read the exact criterion text before
+submitting a review.
+
+To record the review, call `sprintdesk_updateTask` with `taskId` and `review`.
+Provide a registered human reviewer ID and every stored criterion in order:
+
+```json
+{
+  "taskId": "SPD-140",
+  "review": {
+    "reviewerId": "reviewer-identifier",
+    "criteria": [
+      { "criterion": "The exact criterion from sprintdesk_getTask", "result": "met" }
+    ]
+  }
+}
+```
+
+Results must be `met` or `needs work`. SprintDesk records the reviewer and an
+ISO 8601 UTC verification timestamp on every entry. The review summary is
+`accepted` only if every result is `met`; otherwise it is
+`further work required`. Recording a review does not change the task status, and changing
+status to `done` still requires separate `humanVerification` by a registered
+reviewer.
+
 ### Epic Tools
 | Tool | Description |
 |------|-------------|

@@ -101,6 +101,11 @@ async function runMcpCoreTests(): Promise<void> {
 ## 📋 Description
 Keep this description.
 
+## ✅ Acceptance Criteria
+- [ ] Verify the first criterion.
+- Verify the second criterion
+  across a wrapped line.
+
 ## 📝 Notes
 Keep this note.
 `,
@@ -205,6 +210,25 @@ Keep this note.
 `,
     );
 
+    const startedResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 38,
+      method: 'tools/call',
+      params: { name: 'sprintdesk_updateTask', arguments: { taskId: 'SPD-1', status: 'in-progress' } },
+    });
+    assert.equal(JSON.parse(startedResponse.result.content[0].text).status, 'in-progress');
+    const submittedResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 39,
+      method: 'tools/call',
+      params: { name: 'sprintdesk_updateTask', arguments: { taskId: 'SPD-1', status: 'under-review' } },
+    });
+    const submittedTask = JSON.parse(submittedResponse.result.content[0].text);
+    assert.equal(submittedTask.status, 'under-review');
+    assert.equal(submittedTask.workStatus, undefined);
+    assert.equal(submittedTask.review.criteria.length, 2);
+    assert.equal(readFileSync(join(tasksDirectory, '[SPD-1]_document-module.md'), 'utf8').match(/### Review Handoff/g)?.length, 1);
+
     const completeResponse = await handleRequest({
       jsonrpc: '2.0',
       id: 6,
@@ -214,8 +238,17 @@ Keep this note.
     const underReviewTask = JSON.parse(completeResponse.result.content[0].text);
     assert.equal(underReviewTask.status, 'under-review');
     assert.equal(underReviewTask.workStatus, 'review');
+    assert.equal(underReviewTask.review.summary, 'pending');
+    assert.equal(underReviewTask.humanVerification, undefined);
+    assert.deepEqual(underReviewTask.review.criteria.map((entry: { criterion: string }) => entry.criterion), [
+      'Verify the first criterion.',
+      'Verify the second criterion across a wrapped line.',
+    ]);
     const taskOnePath = join(tasksDirectory, '[SPD-1]_document-module.md');
     const afterUnderReview = readFileSync(taskOnePath, 'utf8');
+    assert.match(afterUnderReview, /### Review Handoff/);
+    assert.match(afterUnderReview, /Verify the second criterion across a wrapped line\./);
+    assert.equal(afterUnderReview.match(/### Review Handoff/g)?.length, 1);
     assertSingleTaskTemplateHeaders(afterUnderReview);
     assert.match(afterUnderReview, /Keep this description\./);
     assert.match(afterUnderReview, /Keep this note\./);
@@ -229,6 +262,120 @@ Keep this note.
     const repeatedStatusTask = JSON.parse(repeatedStatusResponse.result.content[0].text);
     assert.equal(repeatedStatusTask.status, 'under-review');
     assert.equal(readFileSync(taskOnePath, 'utf8'), afterUnderReview);
+
+    const rejectedReview = await handleRequest({
+      jsonrpc: '2.0',
+      id: 41,
+      method: 'tools/call',
+      params: {
+        name: 'sprintdesk_updateTask',
+        arguments: {
+          taskId: 'SPD-1',
+          review: {
+            reviewerId: 'reviewer-404',
+            criteria: [
+              { criterion: 'Verify the first criterion.', result: 'met' },
+              { criterion: 'Verify the second criterion across a wrapped line.', result: 'met' },
+            ],
+          },
+        },
+      },
+    });
+    assert.equal(rejectedReview.result.isError, true);
+    const incompleteReview = await handleRequest({
+      jsonrpc: '2.0',
+      id: 46,
+      method: 'tools/call',
+      params: {
+        name: 'sprintdesk_updateTask',
+        arguments: {
+          taskId: 'SPD-1',
+          review: {
+            reviewerId: 'reviewer-2',
+            criteria: [{ criterion: 'Verify the first criterion.', result: 'met' }],
+          },
+        },
+      },
+    });
+    assert.equal(incompleteReview.result.isError, true);
+    const invalidResult = await handleRequest({
+      jsonrpc: '2.0',
+      id: 42,
+      method: 'tools/call',
+      params: {
+        name: 'sprintdesk_updateTask',
+        arguments: {
+          taskId: 'SPD-1',
+          review: {
+            reviewerId: 'reviewer-2',
+            criteria: [
+              { criterion: 'Verify the first criterion.', result: 'approved' },
+              { criterion: 'Verify the second criterion across a wrapped line.', result: 'met' },
+            ],
+          },
+        },
+      },
+    });
+    assert.equal(invalidResult.result.isError, true);
+    assert.equal(readFileSync(taskOnePath, 'utf8'), afterUnderReview);
+
+    const reviewedResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 43,
+      method: 'tools/call',
+      params: {
+        name: 'sprintdesk_updateTask',
+        arguments: {
+          taskId: 'SPD-1',
+          review: {
+            reviewerId: 'reviewer-2',
+            criteria: [
+              { criterion: 'Verify the first criterion.', result: 'met' },
+              { criterion: 'Verify the second criterion across a wrapped line.', result: 'needs work' },
+            ],
+          },
+        },
+      },
+    });
+    assert.equal(reviewedResponse.result.isError, undefined);
+    const reviewedTask = JSON.parse(reviewedResponse.result.content[0].text);
+    assert.equal(reviewedTask.status, 'under-review');
+    assert.equal(reviewedTask.review.summary, 'further work required');
+    assert.equal(reviewedTask.review.reviewerId, 'reviewer-2');
+    assert.match(reviewedTask.review.reviewedAt, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
+    for (const entry of reviewedTask.review.criteria) {
+      assert.equal(entry.reviewerId, 'reviewer-2');
+      assert.match(entry.verifiedAt, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
+    }
+    const reviewReadback = await handleRequest({
+      jsonrpc: '2.0', id: 44, method: 'tools/call',
+      params: { name: 'sprintdesk_getTask', arguments: { taskId: 'SPD-1' } },
+    });
+    assert.deepEqual(JSON.parse(reviewReadback.result.content[0].text).review, reviewedTask.review);
+    assert.match(readFileSync(taskOnePath, 'utf8'), /Summary: further work required/);
+    assert.match(readFileSync(taskOnePath, 'utf8'), /Result: needs work/);
+
+    const acceptedResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 45,
+      method: 'tools/call',
+      params: {
+        name: 'sprintdesk_updateTask',
+        arguments: {
+          taskId: 'SPD-1',
+          review: {
+            reviewerId: 'reviewer-2',
+            criteria: reviewedTask.review.criteria.map((entry: { criterion: string }) => ({
+              criterion: entry.criterion, result: 'met',
+            })),
+          },
+        },
+      },
+    });
+    assert.equal(JSON.parse(acceptedResponse.result.content[0].text).review.summary, 'accepted');
+    assert.equal(JSON.parse(acceptedResponse.result.content[0].text).status, 'under-review');
+    const afterAccepted = readFileSync(taskOnePath, 'utf8');
+    assert.equal(afterAccepted.match(/### Review Handoff/g)?.length, 1);
 
     const missingReviewResponse = await handleRequest({
       jsonrpc: '2.0',
@@ -299,7 +446,7 @@ Keep this note.
       notes: 'Reviewed and approved.',
     });
     const afterDone = readFileSync(taskOnePath, 'utf8');
-    assert.equal(afterDone, afterUnderReview);
+    assert.equal(afterDone, afterAccepted);
 
     const beforeRefresh = readFileSync(tasksPath, 'utf8');
     let refreshCalls = 0;

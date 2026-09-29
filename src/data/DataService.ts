@@ -482,6 +482,10 @@ getTask(taskId: string): Task | undefined {
     let md = `# 🧩 Task: ${task.title}\n\n`;
     md += `## 📋 Description\n`;
     md += `\n## ✅ Acceptance Criteria\n`;
+    const reviewBlock = this.generateReviewTemplate(task);
+    if (reviewBlock) {
+      md += `${reviewBlock}\n`;
+    }
     md += `\n## 📝 Notes\n`;
 
     if (additionalContent) {
@@ -489,6 +493,52 @@ getTask(taskId: string): Task | undefined {
     }
 
     return md;
+  }
+
+  private generateReviewTemplate(task: Task): string {
+    if (task.status !== 'under-review' || !task.review?.criteria.length) {
+      return '';
+    }
+
+    const lines: string[] = [
+      '### Review Handoff',
+      '',
+      `Summary: ${task.review.summary}`,
+      ''
+    ];
+
+    for (const entry of task.review.criteria) {
+      lines.push(`- ${entry.criterion}`);
+      lines.push(`  - Result: ${entry.result || 'not recorded'}`);
+      lines.push(`  - Reviewer: ${entry.reviewerId || 'not recorded'}`);
+      lines.push(`  - Verified at: ${entry.verifiedAt || 'not recorded'}`);
+    }
+
+    return lines.join('\n');
+  }
+
+  getTaskAcceptanceCriteria(task: Task): string[] {
+    const filePath = task.path || path.join(this.getTasksDir(), this.getTaskFilename(task));
+    if (!this.fileSystem.exists(filePath)) {
+      return [];
+    }
+
+    const content = this.fileSystem.readFile(filePath);
+    const section = content.match(/(?:^|\n)## ✅ Acceptance Criteria\r?\n([\s\S]*?)(?=\r?\n#{2,3} |\n?$)/);
+    if (!section) {
+      return [];
+    }
+
+    const criteria: string[] = [];
+    for (const line of section[1].split(/\r?\n/)) {
+      const bullet = line.match(/^[-*]\s+(?:\[[ xX]\]\s*)?(.+)$/);
+      if (bullet) {
+        criteria.push(bullet[1].trim());
+      } else if (/^\s+\S/.test(line) && criteria.length > 0) {
+        criteria[criteria.length - 1] += ` ${line.trim()}`;
+      }
+    }
+    return criteria;
   }
 
   private completeTaskTemplate(task: Task, content: string): string {
@@ -532,6 +582,19 @@ getTask(taskId: string): Task | undefined {
       lines.splice(insertionIndex, 0, fields[fieldIndex].heading, '');
     }
 
+    const reviewBlock = this.generateReviewTemplate(task);
+    if (reviewBlock) {
+      const existingReview = lines.findIndex(line => line === '### Review Handoff');
+      if (existingReview !== -1) {
+        let reviewEnd = existingReview + 1;
+        while (reviewEnd < lines.length && !/^## /.test(lines[reviewEnd])) {
+          reviewEnd += 1;
+        }
+        lines.splice(existingReview, reviewEnd - existingReview);
+      }
+      const notesIndex = lines.indexOf('## 📝 Notes');
+      lines.splice(notesIndex, 0, ...reviewBlock.split('\n'), '');
+    }
     return lines.join(lineEnding);
   }
 

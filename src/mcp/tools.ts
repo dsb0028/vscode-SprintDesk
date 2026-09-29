@@ -27,7 +27,7 @@ export const TASK_TOOLS = [
   },
   {
     name: 'sprintdesk_updateTask',
-    description: 'Update a task. Setting status to done requires humanVerification with a registered human reviewer.',
+    description: 'Update a task or record an under-review acceptance-criteria review. Setting status to done requires humanVerification with a registered human reviewer.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -42,6 +42,25 @@ export const TASK_TOOLS = [
             notes: { type: 'string', description: 'Optional human review notes' },
           },
           required: ['reviewerId'],
+        },
+        review: {
+          type: 'object',
+          description: 'For an under-review task, record every acceptance criterion result without changing its status.',
+          properties: {
+            reviewerId: { type: 'string', description: 'Registered human reviewer ID or name' },
+            criteria: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  criterion: { type: 'string', description: 'Exact acceptance criterion from the review handoff' },
+                  result: { type: 'string', enum: ['met', 'needs work'] },
+                },
+                required: ['criterion', 'result'],
+              },
+            },
+          },
+          required: ['reviewerId', 'criteria'],
         },
         priority: { type: 'string', enum: ['high', 'medium', 'low'] },
         type: { type: 'string', enum: ['feature', 'bug', 'chore', 'doc', 'test'] },
