@@ -59,6 +59,7 @@ import { createTask as createTaskService } from "./services/taskService";
 import { setHost, setFileSystem } from './host';
 import { VSCodeHost } from './host/VSCodeHost';
 import { NodeFileSystem } from './host/NodeFileSystem';
+import { registerReviewCommands } from './review/commands';
 
 const createTask = async (repoPath?: string): Promise<void> => {
   const ws = repoPath || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -156,6 +157,7 @@ export async function activate(context: vscode.ExtensionContext) {
   // Initialize host boundary (VSCode host + synchronous file system)
   setHost(new VSCodeHost());
   setFileSystem(new NodeFileSystem());
+  registerReviewCommands(context);
 
   // Register existing commands (delegated to `src/commands`)
   registerOpenWebviewCommand(context);

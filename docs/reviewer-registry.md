@@ -1,9 +1,10 @@
 # Reviewer Registry
 
 SprintDesk stores every registered human reviewer in one authoritative file.
-Registration, listing, and human-verification lookup all read and write that
+Registration, listing, and reviewer discovery all read and write that
 file through a single persistence boundary, so a reviewer registered once stays
-verifiable across process restarts.
+discoverable across process restarts. This remote registry no longer authorizes
+new approvals: use the [local signed-review authority](authenticated-review.md).
 
 ## Registry Location And Schema
 
@@ -51,20 +52,22 @@ rejected. Duplicate display names are rejected during registration as well.
 | Caller | Entry point |
 | --- | --- |
 | Registration (`sprintdesk_registerHumanReviewer`) | `workforceService.registerHumanReviewer` → `ReviewerStore.register` |
-| Human-verification lookup (`sprintdesk_updateTask` with `status: done`) | `workforceService.findHumanReviewer` → `ReviewerStore.find` |
+| Reviewer discovery | `workforceService.findHumanReviewer` → `ReviewerStore.find` |
 | Listing / counts (`sprintdesk_projectContext`, `sprintdesk_refresh`) | `workforceService.listHumanReviewers` → `ReviewerStore.list`, surfaced as `counts.reviewers` |
 
 `ReviewerStore.find` resolves a normalized `id` first and then falls back to an
-exact normalized `displayName`, matching the `sprintdesk_updateTask` tool
-schema. An unknown reviewer ID is rejected and nothing is written: the task
-status stays unchanged and the registry file is untouched.
+exact normalized `displayName`. Supplying even a registered identity to
+`sprintdesk_updateTask` cannot approve or complete a task; those arguments are
+rejected without mutation. Signing enrollment and per-operation human consent
+belong to the separate local companion.
 
 `workforceService.registerHumanReviewer` also makes sure the person is visible
 in `.SprintDesk/workforce/employees.yml` so existing workforce views keep
 listing them. If a `role: human` employee with that ID already exists it is
 reused exactly as stored and never rewritten; otherwise a new employee record is
 added. That employee record is a presentation copy only — the registry remains
-the authoritative source for reviewer identity and verification.
+the authoritative source for remote registration/discovery. It is not the local
+approval trust root.
 
 Reviewer-management commands (interactive registration, listing, and removal
 UI) are intentionally out of scope for this registry.
@@ -76,7 +79,7 @@ independently maintained sources. There is no migration between them, in either
 direction, at any time.
 
 - Being a `role: human` employee grants **no** reviewer authority. An employee
-  who has not been registered as a reviewer fails human verification.
+  cannot sign approvals merely by appearing in this file.
 - Registering a reviewer never deletes, rewrites, or repurposes an existing
   employee record. A matching `role: human` record is reused byte-for-byte.
 - Agents and the `.SprintDesk/data/team.yml` roster are never reviewers.

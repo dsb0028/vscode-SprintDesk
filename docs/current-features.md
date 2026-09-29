@@ -70,10 +70,18 @@
 
 ### ✅ Human Reviewer Registry
 - Authoritative `.SprintDesk/data/reviewers.yml` registry with a strict `{ id, displayName }` schema
-- Shared persistence boundary for registration, listing, and human-verification lookup
+- Shared persistence boundary for registration, listing, and reviewer discovery
 - Maintained independently of the employee registry, with no migration between them
 - Owner-only permissions, symlink rejection, atomic writes, and cross-process locking
 - See [Reviewer Registry](reviewer-registry.md)
+
+### Guided signed review
+- Local UI-only companion holds approval keys and authoritative ledger
+- Individual criterion confirmations, resumable unchanged drafts, final submission confirmation
+- Separate completion confirmation requires an all-met current review
+- Shared remote persistence checks reject unsigned approval/create/import/bulk writes
+- Legacy history remains unattested; remote tampering is detected by local verification
+- See [Authenticated Review](authenticated-review.md) and [local setup](../companion/README.md)
 
 ## Technical Features
 

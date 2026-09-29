@@ -1,3 +1,5 @@
+import type { SignedReceipt } from '../review/protocol';
+
 export interface Task {
   id: string;
   number: number;
@@ -28,6 +30,8 @@ export interface Task {
   attempts?: number;
   humanVerification?: HumanVerification;
   review?: TaskReview;
+  reviewReceipt?: SignedReceipt;
+  completionReceipt?: SignedReceipt;
 }
 
 export type TaskStatus = 'waiting' | 'in-progress' | 'under-review' | 'done' | 'blocked' | 'cancelled';

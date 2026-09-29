@@ -27,45 +27,56 @@ export const TASK_TOOLS = [
   },
   {
     name: 'sprintdesk_updateTask',
-    description: 'Update a task or record an under-review acceptance-criteria review. Setting status to done requires humanVerification with a registered human reviewer.',
+    description: 'Edit ordinary task metadata or submit under-review. Review decisions and done require the enrolled local reviewer UI, not caller-supplied verification.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         taskId: { type: 'string', description: 'Task ID or code' },
         title: { type: 'string', description: 'New title' },
-        status: { type: 'string', enum: ['waiting', 'in-progress', 'under-review', 'done', 'blocked', 'cancelled'] },
-        humanVerification: {
-          type: 'object',
-          description: 'Required when status is done; records approval by a registered human reviewer.',
-          properties: {
-            reviewerId: { type: 'string', description: 'Registered human reviewer ID or name' },
-            notes: { type: 'string', description: 'Optional human review notes' },
-          },
-          required: ['reviewerId'],
-        },
-        review: {
-          type: 'object',
-          description: 'For an under-review task, record every acceptance criterion result without changing its status.',
-          properties: {
-            reviewerId: { type: 'string', description: 'Registered human reviewer ID or name' },
-            criteria: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  criterion: { type: 'string', description: 'Exact acceptance criterion from the review handoff' },
-                  result: { type: 'string', enum: ['met', 'needs work'] },
-                },
-                required: ['criterion', 'result'],
-              },
-            },
-          },
-          required: ['reviewerId', 'criteria'],
-        },
+        status: { type: 'string', enum: ['waiting', 'in-progress', 'under-review', 'blocked', 'cancelled'] },
         priority: { type: 'string', enum: ['high', 'medium', 'low'] },
         type: { type: 'string', enum: ['feature', 'bug', 'chore', 'doc', 'test'] },
       },
       required: ['taskId'],
+    },
+  },
+  {
+    name: 'sprintdesk_requestHumanReview',
+    description: 'Open local human review UI for an under-review task; cannot sign, approve or complete. Headless clients are refused.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { taskId: { type: 'string' } },
+      required: ['taskId'],
+    },
+  },
+  {
+    name: 'sprintdesk_getReviewSnapshot',
+    description: 'Read the current review snapshot and signed receipts; remote claims must be checked against the local reviewer ledger.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        taskId: { type: 'string' },
+        evidencePaths: { type: 'array', items: { type: 'string' }, maxItems: 32 },
+      },
+      required: ['taskId'],
+    },
+  },
+  {
+    name: 'sprintdesk_commitHumanReview',
+    description: 'Deliver a receipt already signed by the enrolled local reviewer UI. Cannot manufacture consent; review and completion are distinct intents.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        receipt: {
+          type: 'object',
+          properties: {
+            payload: { type: 'object' },
+            signature: { type: 'string' },
+          },
+          required: ['payload', 'signature'],
+        },
+      },
+      required: ['receipt'],
     },
   },
   {

@@ -2,6 +2,8 @@ import * as path from 'path';
 import yaml from 'js-yaml';
 import { getHost, getFileSystem, IFileSystem } from '../host';
 import { Config, Task, Epic, Backlog, Sprint, TasksData, EpicsData, BacklogsData, SprintsData, DEFAULT_CONFIG } from './types';
+import { canonical, digest, Enrollment, keyId, SignedReceipt, SnapshotResponse, reviewedMarkdown, verifyReceipt } from '../review/protocol';
+import { authorizeChange, protectedChange, receiptReview, receiptVerification, taskMetadata } from '../review/authorization';
 
 const SPRINTDESK_DIR = '.SprintDesk';
 const SETTINGS_DIR = 'settings';
@@ -213,21 +215,206 @@ export class DataService {
 
   // === Tasks ===
   loadTasks(): Task[] {
+    return this.loadTaskDocument().tasks;
+  }
+
+  private loadTaskDocument(): TasksData & { approvals?: SignedReceipt[] } {
     const tasksPath = path.join(this.getDataPath(), 'tasks.yml');
-    try {
-      if (!this.fileSystem.exists(tasksPath)) return [];
-      const content = this.fileSystem.readFile(tasksPath);
-      const data = yaml.load(content) as TasksData;
-      return data.tasks || [];
-    } catch (e) {
-      return [];
+    if (!this.fileSystem.exists(tasksPath)) {
+      return { tasks: [] };
     }
+    const data = yaml.load(this.fileSystem.readFile(tasksPath)) as TasksData & { approvals?: SignedReceipt[] };
+    if (!data || !Array.isArray(data.tasks) || (data.approvals !== undefined && !Array.isArray(data.approvals))) {
+      throw new Error('Invalid task store; refusing mutation');
+    }
+    return data;
   }
 
   saveTasks(tasks: Task[]): void {
     const tasksPath = path.join(this.getDataPath(), 'tasks.yml');
     this.fileSystem.mkdir(path.dirname(tasksPath), { recursive: true });
-    this.fileSystem.writeFile(tasksPath, yaml.dump({ tasks }));
+    if (this.fileSystem.withLock) {
+      this.fileSystem.withLock(tasksPath, () => this.persistTasks(tasks));
+    } else {
+      this.persistTasks(tasks);
+    }
+  }
+
+  private persistTasks(tasks: Task[]): void {
+    const document = this.loadTaskDocument();
+    const previous = document.tasks;
+    const approvals = [...(document.approvals ?? [])];
+    if (new Set(tasks.map(task => task.id)).size !== tasks.length) {
+      throw new Error('Duplicate task identity');
+    }
+    for (const task of tasks) {
+      const before = previous.find(entry => entry.id === task.id);
+      if (!protectedChange(before, task)) {
+        continue;
+      }
+      if (!before) {
+        throw new Error('Cannot create/import protected task state without signed approval');
+      }
+      const receipt = task.completionReceipt !== before.completionReceipt
+        && canonical(task.completionReceipt ?? null) !== canonical(before.completionReceipt ?? null)
+        ? task.completionReceipt : task.reviewReceipt;
+      if (!receipt) {
+        throw new Error('Protected task writes require signed local UI approval');
+      }
+      const enrollment = this.getReviewEnrollment();
+      const snapshot = this.reviewSnapshot(before.id, receipt.payload.evidencePaths).snapshot;
+      authorizeChange(before, task, snapshot, enrollment);
+      if (approvals.some(entry => entry.payload.operationId === receipt.payload.operationId)) {
+        throw new Error('Signed approval operation already consumed');
+      }
+      const last = [...approvals].reverse().find(entry => entry.payload.taskId === before.id);
+      if (last && (receipt.payload.createdAt !== last.payload.createdAt
+        || receipt.payload.incarnation !== last.payload.incarnation
+        || receipt.payload.sequence <= last.payload.sequence
+        || (last.payload.intent === 'complete' && !before.completionReceipt))) {
+        throw new Error('Task identity reuse or stale approval history');
+      }
+      approvals.push(receipt);
+    }
+    const tasksPath = path.join(this.getDataPath(), 'tasks.yml');
+    this.fileSystem.mkdir(path.dirname(tasksPath), { recursive: true });
+    const content = yaml.dump(approvals.length ? { tasks, approvals } : { tasks });
+    if (this.fileSystem.writeAtomic) {
+      this.fileSystem.writeAtomic(tasksPath, content);
+    } else {
+      this.fileSystem.writeFile(tasksPath, content);
+    }
+  }
+
+  getReviewAudit(): SignedReceipt[] {
+    const approvals = this.loadTaskDocument().approvals ?? [];
+    if (approvals.length) {
+      const enrollment = this.getReviewEnrollment();
+      for (const receipt of approvals) {
+        verifyReceipt(receipt, enrollment);
+      }
+    }
+    return approvals;
+  }
+
+  getReviewEnrollment(): Enrollment {
+    const file = path.join(this.getDataPath(), 'review-authority.json');
+    if (!this.fileSystem.exists(file)) {
+      throw new Error('Local reviewer companion is not enrolled');
+    }
+    const enrollment = JSON.parse(this.fileSystem.readFile(file)) as Enrollment;
+    if (enrollment.version !== 1 || !enrollment.projectId || !enrollment.reviewerId
+      || !enrollment.reviewerName || keyId(enrollment.publicKey) !== enrollment.keyId) {
+      throw new Error('Invalid reviewer enrollment mirror');
+    }
+    return enrollment;
+  }
+
+  enrollReview(enrollment: Enrollment): void {
+    if (enrollment.version !== 1 || !enrollment.projectId || !enrollment.reviewerId
+      || !enrollment.reviewerName || keyId(enrollment.publicKey) !== enrollment.keyId) {
+      throw new Error('Invalid reviewer enrollment');
+    }
+    const file = path.join(this.getDataPath(), 'review-authority.json');
+    if (this.fileSystem.exists(file)
+      && canonical(this.getReviewEnrollment()) !== canonical(enrollment)) {
+      throw new Error('Reviewer key replacement requires explicit local recovery');
+    }
+    this.fileSystem.mkdir(this.getDataPath(), { recursive: true });
+    this.fileSystem.writeFile(file, JSON.stringify(enrollment));
+  }
+
+  reviewSnapshot(taskId: string, evidencePaths: string[] = []): SnapshotResponse {
+    const task = this.getTask(taskId) || this.getTaskByCode(taskId);
+    if (!task) {
+      throw new Error('Review task not found');
+    }
+    if (!Array.isArray(evidencePaths) || evidencePaths.length > 32) {
+      throw new Error('Invalid evidence paths');
+    }
+    const evidence = evidencePaths.map(relative => {
+      if (typeof relative !== 'string' || !relative || path.isAbsolute(relative)
+        || relative.split(/[\\/]/).some(part => part === '..' || part === '.SprintDesk')
+        || relative.includes('\0')) {
+        throw new Error('Evidence must be repository-relative non-task files');
+      }
+      const content = this.readReviewFile(path.join(this.workspaceRoot, relative));
+      if (Buffer.byteLength(content) > 1_000_000) {
+        throw new Error('Evidence file exceeds 1 MB; select bounded text evidence');
+      }
+      return { path: relative, content };
+    });
+    const markdownPath = task.path || path.join(this.getTasksDir(), this.getTaskFilename(task));
+    const markdown = this.readReviewFile(markdownPath);
+    if (Buffer.byteLength(markdown) > 1_000_000) {
+      throw new Error('Task Markdown exceeds 1 MB');
+    }
+
+    return {
+      snapshot: {
+        version: 1, projectId: this.getReviewEnrollment().projectId,
+        taskId: task.id, createdAt: task.createdAt, metadata: taskMetadata(task),
+        criteria: this.getTaskAcceptanceCriteria(task), markdown: reviewedMarkdown(markdown), evidence,
+      },
+      status: task.status, workStatus: task.workStatus,
+      reviewReceipt: task.reviewReceipt, completionReceipt: task.completionReceipt,
+      review: task.review, humanVerification: task.humanVerification,
+    };
+  }
+
+  private readReviewFile(file: string): string {
+    const resolved = this.fileSystem.realPath?.(file) ?? path.resolve(file);
+    const root = this.fileSystem.realPath?.(this.workspaceRoot) ?? path.resolve(this.workspaceRoot);
+    const relative = path.relative(root, resolved);
+    if (!relative || path.isAbsolute(relative) || relative === '..'
+      || relative.startsWith(`..${path.sep}`)) {
+      throw new Error('Review evidence must remain inside its workspace');
+    }
+    return this.fileSystem.readFile(file);
+  }
+
+  commitReview(receipt: SignedReceipt): Task {
+    const task = this.getTask(receipt.payload.taskId);
+    if (!task) {
+      throw new Error('Review task not found');
+    }
+    const stored = receipt.payload.intent === 'complete' ? task.completionReceipt : task.reviewReceipt;
+    if (stored && canonical(stored) === canonical(receipt)) {
+      const enrollment = this.getReviewEnrollment();
+      verifyReceipt(receipt, enrollment);
+      if (!task.reviewReceipt) {
+        throw new Error('Committed approval is missing its signed review');
+      }
+      verifyReceipt(task.reviewReceipt, enrollment);
+      const response = this.reviewSnapshot(task.id, receipt.payload.evidencePaths);
+      if (receipt.payload.snapshotDigest !== digest(response.snapshot)
+        || (receipt.payload.intent === 'review' && task.status !== 'under-review')
+        || canonical(task.review ?? null) !== canonical(receiptReview(task.reviewReceipt))
+        || (receipt.payload.intent === 'complete' && (task.status !== 'done' || task.workStatus !== 'done'
+          || receipt.payload.reviewOperationId !== task.reviewReceipt.payload.operationId
+          || task.reviewReceipt.payload.snapshotDigest !== receipt.payload.snapshotDigest
+          || task.reviewReceipt.payload.incarnation !== receipt.payload.incarnation
+          || task.reviewReceipt.payload.sequence >= receipt.payload.sequence
+          || !task.reviewReceipt.payload.criteria.every(entry => entry.result === 'met')
+          || canonical(task.humanVerification ?? null) !== canonical(receiptVerification(receipt, enrollment))))) {
+        throw new Error('Committed approval content has drifted');
+      }
+      this.saveTaskMd(task);
+      return task;
+    }
+    const next: Task = receipt.payload.intent === 'review'
+      ? { ...task, review: receiptReview(receipt), reviewReceipt: receipt }
+      : { ...task, status: 'done', workStatus: 'done', completionReceipt: receipt,
+        humanVerification: receiptVerification(receipt, this.getReviewEnrollment()) };
+    const tasks = this.loadTasks().map(entry => entry.id === task.id
+      ? { ...next, updatedAt: new Date().toISOString() } : entry);
+    this.saveTasks(tasks);
+    const committed = this.getTask(task.id);
+    if (!committed) {
+      throw new Error('Approval commit readback failed');
+    }
+    this.saveTaskMd(committed);
+    return committed;
   }
 
   addTask(task: Task): void {

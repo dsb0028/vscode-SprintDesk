@@ -1,0 +1,22 @@
+{
+  "name": "sprintdesk-local-reviewer",
+  "displayName": "SprintDesk Local Reviewer",
+  "description": "Independent local reviewer authority for SprintDesk remote workspaces",
+  "publisher": "sprintdesk-local",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.99.0" },
+  "categories": ["Other"],
+  "extensionKind": ["ui"],
+  "main": "./dist/extension.js",
+  "activationEvents": ["onCommand:sprintdeskReviewer.openReview"],
+  "contributes": {
+    "commands": [{ "command": "sprintdeskReviewer.openReview", "title": "SprintDesk: Open Local Authenticated Review" }]
+  },
+  "scripts": {
+    "check": "../node_modules/.bin/tsc --noEmit -p tsconfig.json",
+    "lint": "../node_modules/.bin/eslint src --ext ts --max-warnings 0",
+    "test": "../node_modules/.bin/tsc -p tsconfig.tests.json && node out/companion/tests/state.test.js && node out/companion/tests/source.test.js && node out/companion/tests/storage.test.js && node tests/integration.cjs",
+    "build": "npm run check && ../node_modules/.bin/webpack --config webpack.config.cjs --mode production",
+    "package": "npm run build && node scripts/package.cjs"
+  }
+}

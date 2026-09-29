@@ -1,8 +1,9 @@
 import * as taskService from '../../services/taskService';
-import * as workforceService from '../../services/workforce/workforceService';
 import { getStores } from '../../data/stores';
-import { HumanVerification, ReviewResult, Task, TaskReview } from '../../data/types';
+import { Task, TaskReview } from '../../data/types';
 import { DataService } from '../../data/DataService';
+import { getHost } from '../../host';
+import { SignedReceipt } from '../../review/protocol';
 import { Handler, HandlerResult, res, getWs, getDs, findTask, resolveAgent, recordAudit } from './helpers';
 
 async function handle_sprintdesk_tasksAssign(args: any): Promise<HandlerResult> {
@@ -92,20 +93,11 @@ async function handle_sprintdesk_updateTask(args: any): Promise<HandlerResult> {
   if (!task) return res(`Task not found: ${args.taskId}`, true);
 
   const updates: Partial<Task> = {};
-  let humanVerification: HumanVerification | undefined;
+  if (args.status === 'done' || args.humanVerification !== undefined || args.review !== undefined) {
+    return res('Protected approval writes require the local reviewer companion UI. Use sprintdesk_requestHumanReview; reviewer IDs or chat consent alone cannot approve.', true);
+  }
   if (args.title) updates.title = args.title;
   if (args.status) {
-    if (args.status === 'done') {
-      humanVerification = getHumanVerification(args);
-      if (!humanVerification) {
-        return res(
-          'Cannot set task status to done without human verification. Provide humanVerification.reviewerId for a registered human reviewer.',
-          true,
-        );
-      }
-      updates.humanVerification = humanVerification;
-      updates.workStatus = 'done';
-    }
     if (args.status === 'under-review') {
       const review = buildReviewHandoff(task, ds);
       updates.review = review;
@@ -114,19 +106,6 @@ async function handle_sprintdesk_updateTask(args: any): Promise<HandlerResult> {
   }
   if (args.priority) updates.priority = args.priority;
   if (args.type) updates.type = args.type;
-  if (args.review !== undefined) {
-    if (args.status) {
-      return res('Review results cannot change the task status', true);
-    }
-    if (task.status !== 'under-review') {
-      return res('Only under-review tasks accept review results', true);
-    }
-    const review = recordTaskReview(task, args.review);
-    if (typeof review === 'string') {
-      return res(review, true);
-    }
-    updates.review = review;
-  }
 
   if (Object.keys(updates).length === 0) {
     return res('No updates provided', true);
@@ -135,15 +114,6 @@ async function handle_sprintdesk_updateTask(args: any): Promise<HandlerResult> {
   ds.updateTask(task.id, updates);
   const updatedTask = ds.getTask(task.id);
   if (updatedTask) ds.saveTaskMd(updatedTask);
-  if (humanVerification) {
-    recordAudit({
-      actor: humanVerification.reviewerId,
-      action: 'approve',
-      targetType: 'task',
-      targetId: task.id,
-      details: { taskCode: task.code, notes: humanVerification.notes },
-    });
-  }
 
   return res(JSON.stringify(updatedTask, null, 2));
 }
@@ -158,36 +128,6 @@ function buildReviewHandoff(task: Task, ds: DataService): TaskReview {
   };
 }
 
-function recordTaskReview(task: Task, input: any): TaskReview | string {
-  const reviewer = workforceService.findHumanReviewer(input?.reviewerId);
-  if (!reviewer) {
-    return 'Review requires a registered human reviewer';
-  }
-  const expected = task.review?.criteria;
-  if (!expected?.length || !Array.isArray(input.criteria) || input.criteria.length !== expected.length) {
-    return 'Review must provide a result for every acceptance criterion';
-  }
-  for (let index = 0; index < expected.length; index += 1) {
-    const entry = input.criteria[index];
-    if (!entry || entry.criterion !== expected[index].criterion
-      || (entry.result !== 'met' && entry.result !== 'needs work')) {
-      return 'Review must provide each acceptance criterion in order with result met or needs work';
-    }
-  }
-  const reviewedAt = new Date().toISOString();
-  return {
-    summary: input.criteria.every((entry: { result: ReviewResult }) => entry.result === 'met')
-      ? 'accepted' : 'further work required',
-    reviewerId: reviewer.id,
-    reviewedAt,
-    criteria: expected.map((entry, index) => ({
-      criterion: entry.criterion,
-      result: input.criteria[index].result,
-      reviewerId: reviewer.id,
-      verifiedAt: reviewedAt,
-    })),
-  };
-}
 
 async function handle_sprintdesk_deleteTask(args: any): Promise<HandlerResult> {
   const ds = getDs();
@@ -284,18 +224,42 @@ async function handle_sprintdesk_tasksComplete(args: any): Promise<HandlerResult
   return res(JSON.stringify(updatedTask, null, 2));
 }
 
-function getHumanVerification(args: any): HumanVerification | undefined {
-  const reviewer = workforceService.findHumanReviewer(args.humanVerification?.reviewerId);
-  if (!reviewer) {
-    return undefined;
+async function requestHumanReview(args: { taskId: string }): Promise<HandlerResult> {
+  const ds = getDs();
+  if (!ds) {
+    return res('No workspace found', true);
   }
+  const task = findTask(ds, args.taskId);
+  if (!task) {
+    return res('Task not found', true);
+  }
+  if (task.status !== 'under-review') {
+    return res('Only under-review tasks can request human review', true);
+  }
+  const host = getHost();
+  if (!host.requestHumanReview) {
+    return res('Headless clients cannot approve; open the enrolled local reviewer UI', true);
+  }
+  await host.requestHumanReview(task.id);
+  return res('Review requested in the local UI; no approval or completion has been recorded.');
+}
 
-  return {
-    reviewerId: reviewer.id,
-    reviewerName: reviewer.displayName,
-    approvedAt: new Date().toISOString(),
-    ...(args.humanVerification.notes ? { notes: args.humanVerification.notes } : {}),
-  };
+async function getReviewSnapshot(
+  args: { taskId: string; evidencePaths?: string[] },
+): Promise<HandlerResult> {
+  const ds = getDs();
+  if (!ds) {
+    return res('No workspace found', true);
+  }
+  return res(JSON.stringify(ds.reviewSnapshot(args.taskId, args.evidencePaths)));
+}
+
+async function commitHumanReview(args: { receipt: SignedReceipt }): Promise<HandlerResult> {
+  const ds = getDs();
+  if (!ds) {
+    return res('No workspace found', true);
+  }
+  return res(JSON.stringify(ds.commitReview(args.receipt)));
 }
 
 export const TASK_HANDLERS: Record<string, Handler> = {
@@ -309,4 +273,7 @@ export const TASK_HANDLERS: Record<string, Handler> = {
   sprintdesk_tasksComplete: handle_sprintdesk_tasksComplete,
   sprintdesk_tasksAssign: handle_sprintdesk_tasksAssign,
   sprintdesk_tasksUnassign: handle_sprintdesk_tasksUnassign,
+  sprintdesk_requestHumanReview: requestHumanReview,
+  sprintdesk_getReviewSnapshot: getReviewSnapshot,
+  sprintdesk_commitHumanReview: commitHumanReview,
 };

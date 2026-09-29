@@ -3,6 +3,14 @@ import { exec as nodeExec, execSync as nodeExecSync } from 'child_process';
 import { IHost, GitUser, MessageType, ExecOptions, ExecResult } from './IHost';
 
 export class VSCodeHost implements IHost {
+  async requestHumanReview(taskId: string): Promise<void> {
+    const command = 'sprintdeskReviewer.openReview';
+    if (!(await vscode.commands.getCommands()).includes(command)) {
+      throw new Error('Install and enroll the local SprintDesk Reviewer companion first');
+    }
+    await vscode.commands.executeCommand(command, taskId);
+  }
+
   getWorkspaceRoot(): string | undefined {
     return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   }

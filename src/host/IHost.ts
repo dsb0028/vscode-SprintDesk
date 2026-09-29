@@ -24,4 +24,5 @@ export interface IHost {
   execSync(command: string, options?: ExecOptions): ExecResult;
   exec(command: string, options?: ExecOptions): Promise<ExecResult>;
   getWorkspaceFolderForUri?(uriPath: string): string | undefined;
+  requestHumanReview?(taskId: string): Promise<void>;
 }

@@ -11,7 +11,8 @@ A productivity extension for managing tasks, epics, backlogs, and sprints direct
 - **Quick Add Command:** Use the "Add Quickly" command to create tasks, epics, and backlog entries with a single input.
 - **Sprint Planning:** Move tasks from backlogs to sprints for active development.
 - **Task Calendar:** Browse sprint-colored task cards, date-range ribbons, and an interactive task-details sidebar.
-- **Human Reviewer Registry:** Register human reviewers in an authoritative, owner-only `.SprintDesk/data/reviewers.yml` used for task human verification. See [Reviewer Registry](docs/reviewer-registry.md).
+- **Human Review:** Guided, individually confirmed decisions in a separately installed local reviewer companion. Signed review and separate completion receipts replace caller-supplied approval. See [Authenticated Review](docs/authenticated-review.md).
+- **Human Reviewer Registry:** Discover registered reviewers through the owner-only registry. Registration alone cannot authorize approval. See [Reviewer Registry](docs/reviewer-registry.md).
 - **VSCode Integration:** Access all features from the sidebar and command palette.
 - **Markdown Linking:** Tasks, epics, and backlogs are interlinked using Markdown for easy navigation.
 
@@ -40,10 +41,14 @@ A productivity extension for managing tasks, epics, backlogs, and sprints direct
 
 ## Human reviewer registry
 
-Completing a task requires human verification by a registered reviewer.
-Reviewers live in `<workspace>/.SprintDesk/data/reviewers.yml`, which uses a
-strict schema and is the single source consulted by registration, listing, and
-verification:
+New completion requires a current all-met signed review and a separate local
+human UI confirmation. Install and explicitly enroll the
+[local companion](companion/README.md) on your own computer, not the SSH host.
+Existing approvals remain unattested history; registration alone, remote file
+edits and chat answers cannot create authenticated approvals.
+
+For discovery, reviewers live in `<workspace>/.SprintDesk/data/reviewers.yml`,
+which uses a strict schema shared by registration and listing:
 
 ```yaml
 reviewers:
@@ -55,14 +60,19 @@ An empty registry is written as `reviewers: []`. Reviewer IDs are trimmed,
 display names are trimmed with inner whitespace collapsed, and duplicates are
 rejected. The registry is maintained independently of
 `.SprintDesk/workforce/employees.yml`: there is no migration between the two,
-and a `role: human` employee who has not been registered here has no reviewer
-authority. The file is created owner-only (`0600`), is written atomically under
+and a `role: human` employee has no signing authority. The file is created owner-only (`0600`), is written atomically under
 a cross-process lock, and is excluded from source control.
 
 Enable registration with the `sprintdesk.reviewerRegistrationEnabled` setting,
 then register through the `sprintdesk_registerHumanReviewer` MCP tool. Full
 schema, failure, permission, and locking behavior is documented in
 [docs/reviewer-registry.md](docs/reviewer-registry.md).
+
+Supported MCP clients can request/open/read reviews or deliver an already signed
+receipt; they cannot approve unattended. See [MCP review API](docs/mcp-review.md).
+Private keys and authoritative approval history stay local. Remote projections
+are not authoritative; local verification detects mismatches but cannot prevent
+the remote account from destroying files or replacing remote software.
 
 ---
 

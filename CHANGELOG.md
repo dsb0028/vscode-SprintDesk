@@ -6,6 +6,22 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Guided review (0.6.0, pending installation validation)
+
+- Separate local UI-only reviewer companion with independently retained keys,
+  drafts, task incarnations and signed approval ledger.
+- One human confirmation per criterion, final review confirmation, and distinct
+  completion confirmation requiring an all-met current review.
+- Shared protected-write checks cover MCP, task-service, create/import and bulk
+  saves. Caller-supplied review decisions and reviewer IDs no longer authorize
+  approvals. Legacy approvals remain unattested history.
+- Snapshot-bound signatures, atomic task/approval-history persistence,
+  idempotent delivery and stale/replayed/content-drift rejection.
+- New request/read/signed-delivery MCP tools; raw task-file projections are not
+  authoritative approval evidence.
+- Automated tests and production builds are separate from installed local-host
+  placement and actual human acceptance, which remain pending.
+
 ### Added
 
 - **Reviewer registry:** `.SprintDesk/data/reviewers.yml` is now the authoritative source for

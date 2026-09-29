@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { load } from 'js-yaml';
+import { generateKeyPairSync, randomUUID } from 'node:crypto';
+import { dump, load } from 'js-yaml';
+import { Task } from '../data/types';
 import * as workforceService from '../services/workforce/workforceService';
 import { setFileSystem, setHost } from '../host';
 import { NodeFileSystem } from '../host/NodeFileSystem';
 import { IHost } from '../host/IHost';
 import { handleRequest } from './core';
+import { getDataService } from '../data/DataService';
+import { digest, keyId, ReceiptPayload, signReceipt } from '../review/protocol';
 
 function createHost(workspaceRoot: string, config: Record<string, unknown> = {}): IHost {
   return {
@@ -23,6 +27,13 @@ function getRefreshSnapshot(response: any): Record<string, unknown> {
   return JSON.parse(response.result.content[0].text) as Record<string, unknown>;
 }
 
+function appendTaskFixture(file: string, entry: string): void {
+  const data = load(readFileSync(file, 'utf8')) as { tasks: Task[] };
+  const additional = load(`tasks:\n${entry}`) as { tasks: Task[] };
+  data.tasks.push(...additional.tasks);
+  writeFileSync(file, dump(data));
+}
+
 function assertSingleTaskTemplateHeaders(markdown: string): void {
   const headingCounts = [
     /^# 🧩 Task:/gm,
@@ -31,6 +42,28 @@ function assertSingleTaskTemplateHeaders(markdown: string): void {
     /^## 📝 Notes$/gm,
   ].map(pattern => markdown.match(pattern)?.length ?? 0);
   assert.deepEqual(headingCounts, [1, 1, 1, 1]);
+}
+
+function assertReviewMarkdown(task: Task, markdown: string): void {
+  assert.ok(task.review);
+  const expected = [
+    '### Review Handoff',
+    '',
+    `Summary: ${task.review.summary}`,
+    '',
+  ];
+  for (const entry of task.review.criteria) {
+    expected.push(
+      `- ${entry.criterion}`,
+      `  - Result: ${entry.result}`,
+      `  - Reviewer: ${entry.reviewerId}`,
+      `  - Verified at: ${entry.verifiedAt}`,
+    );
+  }
+  const handoff = markdown.split('### Review Handoff')[1]?.split('## 📝 Notes')[0];
+  assert.ok(handoff);
+  assert.equal(`### Review Handoff${handoff}`.trim(), expected.join('\n'));
+  assert.equal(markdown.match(/^### Review Handoff$/gm)?.length, 1);
 }
 
 async function runMcpCoreTests(): Promise<void> {
@@ -57,6 +90,15 @@ async function runMcpCoreTests(): Promise<void> {
     title: Document module
     type: doc
     status: waiting
+    workStatus: assigned
+    assignee: fixture-owner
+    source: fixture
+    agent: fixture-agent
+    workflow: fixture-workflow
+    runId: fixture-run
+    attempts: 2
+    startDate: '2026-01-01'
+    endDate: '2026-01-14'
     priority: high
     epic: null
     backlog: technical
@@ -134,7 +176,12 @@ Keep this note.
     assert.ok(toolNames.includes('sprintdesk_listHumanReviewers'));
     const updateTaskTool = toolsResponse.result.tools.find((tool: { name: string }) => tool.name === 'sprintdesk_updateTask');
     assert.ok(updateTaskTool.inputSchema.properties.status.enum.includes('under-review'));
-    assert.ok(updateTaskTool.inputSchema.properties.humanVerification);
+    assert.equal(updateTaskTool.inputSchema.properties.humanVerification, undefined);
+    assert.equal(updateTaskTool.inputSchema.properties.review, undefined);
+    assert.ok(!updateTaskTool.inputSchema.properties.status.enum.includes('done'));
+    assert.ok(toolNames.includes('sprintdesk_requestHumanReview'));
+    assert.ok(toolNames.includes('sprintdesk_getReviewSnapshot'));
+    assert.ok(toolNames.includes('sprintdesk_commitHumanReview'));
 
     const unauthorizedRegistration = await handleRequest({
       jsonrpc: '2.0',
@@ -216,7 +263,8 @@ Keep this note.
       method: 'tools/call',
       params: { name: 'sprintdesk_updateTask', arguments: { taskId: 'SPD-1', status: 'in-progress' } },
     });
-    assert.equal(JSON.parse(startedResponse.result.content[0].text).status, 'in-progress');
+    const startedTask: Task = JSON.parse(startedResponse.result.content[0].text);
+    assert.equal(startedTask.status, 'in-progress');
     const submittedResponse = await handleRequest({
       jsonrpc: '2.0',
       id: 39,
@@ -225,9 +273,22 @@ Keep this note.
     });
     const submittedTask = JSON.parse(submittedResponse.result.content[0].text);
     assert.equal(submittedTask.status, 'under-review');
-    assert.equal(submittedTask.workStatus, undefined);
+    assert.equal(submittedTask.workStatus, 'assigned');
     assert.equal(submittedTask.review.criteria.length, 2);
-    assert.equal(readFileSync(join(tasksDirectory, '[SPD-1]_document-module.md'), 'utf8').match(/### Review Handoff/g)?.length, 1);
+    assert.deepEqual(submittedTask, {
+      ...startedTask,
+      status: 'under-review',
+      updatedAt: submittedTask.updatedAt,
+      review: submittedTask.review,
+    });
+    assert.match(submittedTask.updatedAt, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
+    const submittedMarkdown = readFileSync(join(tasksDirectory, '[SPD-1]_document-module.md'), 'utf8');
+    assert.equal(submittedMarkdown.match(/### Review Handoff/g)?.length, 1);
+    assert.equal(submittedMarkdown.match(/  - Result: not recorded/g)?.length, 2);
+    assert.match(submittedMarkdown, /- \[ \] Verify the first criterion\./);
+    assert.match(submittedMarkdown, /- Verify the second criterion\n  across a wrapped line\./);
+    assert.match(submittedMarkdown, /Keep this description\./);
+    assert.match(submittedMarkdown, /Keep this note\./);
 
     const completeResponse = await handleRequest({
       jsonrpc: '2.0',
@@ -263,6 +324,14 @@ Keep this note.
     assert.equal(repeatedStatusTask.status, 'under-review');
     assert.equal(readFileSync(taskOnePath, 'utf8'), afterUnderReview);
 
+    const headlessReviewRequest = await handleRequest({
+      jsonrpc: '2.0', id: 80, method: 'tools/call',
+      params: { name: 'sprintdesk_requestHumanReview', arguments: { taskId: 'SPD-1' } },
+    });
+    assert.equal(headlessReviewRequest.result.isError, true);
+    assert.match(headlessReviewRequest.result.content[0].text, /Headless/);
+    assert.equal(readFileSync(taskOnePath, 'utf8'), afterUnderReview);
+    const beforeRejectedReviews = readFileSync(tasksPath, 'utf8');
     const rejectedReview = await handleRequest({
       jsonrpc: '2.0',
       id: 41,
@@ -317,23 +386,37 @@ Keep this note.
       },
     });
     assert.equal(invalidResult.result.isError, true);
+    assert.equal(readFileSync(tasksPath, 'utf8'), beforeRejectedReviews);
     assert.equal(readFileSync(taskOnePath, 'utf8'), afterUnderReview);
 
+    const reviewService = getDataService(workspace);
+    const testKeys = generateKeyPairSync('ed25519');
+    const testPublicKey = testKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    const testPrivateKey = testKeys.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    reviewService.enrollReview({
+      version: 1, projectId: 'test-project', reviewerId: 'reviewer-2', reviewerName: 'Second Reviewer',
+      keyId: keyId(testPublicKey), publicKey: testPublicKey,
+    });
+    const testSnapshot = reviewService.reviewSnapshot('SPD-1').snapshot;
+    const reviewPayload: ReceiptPayload = {
+      version: 1, intent: 'review', projectId: 'test-project', taskId: testSnapshot.taskId,
+      createdAt: testSnapshot.createdAt, incarnation: randomUUID(), reviewerId: 'reviewer-2',
+      keyId: keyId(testPublicKey), snapshotDigest: digest(testSnapshot), expectedStatus: 'under-review',
+      operationId: randomUUID(), sequence: 1, timestamp: new Date().toISOString(),
+      criteria: [
+        { criterion: 'Verify the first criterion.', result: 'met' },
+        { criterion: 'Verify the second criterion across a wrapped line.', result: 'needs work' },
+      ],
+      evidencePaths: [],
+    };
     const reviewedResponse = await handleRequest({
       jsonrpc: '2.0',
       id: 43,
       method: 'tools/call',
       params: {
-        name: 'sprintdesk_updateTask',
+        name: 'sprintdesk_commitHumanReview',
         arguments: {
-          taskId: 'SPD-1',
-          review: {
-            reviewerId: 'reviewer-2',
-            criteria: [
-              { criterion: 'Verify the first criterion.', result: 'met' },
-              { criterion: 'Verify the second criterion across a wrapped line.', result: 'needs work' },
-            ],
-          },
+          receipt: signReceipt(reviewPayload, testPrivateKey),
         },
       },
     });
@@ -354,21 +437,24 @@ Keep this note.
     assert.deepEqual(JSON.parse(reviewReadback.result.content[0].text).review, reviewedTask.review);
     assert.match(readFileSync(taskOnePath, 'utf8'), /Summary: further work required/);
     assert.match(readFileSync(taskOnePath, 'utf8'), /Result: needs work/);
+    assertReviewMarkdown(reviewedTask, readFileSync(taskOnePath, 'utf8'));
+    assertReviewMarkdown(
+      JSON.parse(reviewReadback.result.content[0].text),
+      readFileSync(taskOnePath, 'utf8'),
+    );
 
+    const acceptedPayload: ReceiptPayload = {
+      ...reviewPayload, operationId: randomUUID(), sequence: 2,
+      criteria: reviewPayload.criteria.map(entry => ({ ...entry, result: 'met' })),
+    };
     const acceptedResponse = await handleRequest({
       jsonrpc: '2.0',
       id: 45,
       method: 'tools/call',
       params: {
-        name: 'sprintdesk_updateTask',
+        name: 'sprintdesk_commitHumanReview',
         arguments: {
-          taskId: 'SPD-1',
-          review: {
-            reviewerId: 'reviewer-2',
-            criteria: reviewedTask.review.criteria.map((entry: { criterion: string }) => ({
-              criterion: entry.criterion, result: 'met',
-            })),
-          },
+          receipt: signReceipt(acceptedPayload, testPrivateKey),
         },
       },
     });
@@ -376,7 +462,20 @@ Keep this note.
     assert.equal(JSON.parse(acceptedResponse.result.content[0].text).status, 'under-review');
     const afterAccepted = readFileSync(taskOnePath, 'utf8');
     assert.equal(afterAccepted.match(/### Review Handoff/g)?.length, 1);
+    assertReviewMarkdown(JSON.parse(acceptedResponse.result.content[0].text), afterAccepted);
+    const repeatedAcceptedResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 47,
+      method: 'tools/call',
+      params: { name: 'sprintdesk_updateTask', arguments: { taskId: 'SPD-1', status: 'under-review' } },
+    });
+    assert.deepEqual(
+      JSON.parse(repeatedAcceptedResponse.result.content[0].text).review,
+      JSON.parse(acceptedResponse.result.content[0].text).review,
+    );
+    assert.equal(readFileSync(taskOnePath, 'utf8'), afterAccepted);
 
+    const beforeRejectedApprovals = readFileSync(tasksPath, 'utf8');
     const missingReviewResponse = await handleRequest({
       jsonrpc: '2.0',
       id: 7,
@@ -384,7 +483,7 @@ Keep this note.
       params: { name: 'sprintdesk_updateTask', arguments: { taskId: 'SPD-1', status: 'done' } },
     });
     assert.equal(missingReviewResponse.result.isError, true);
-    assert.match(missingReviewResponse.result.content[0].text, /human verification/);
+    assert.match(missingReviewResponse.result.content[0].text, /local reviewer/);
 
     const registryBeforeUnknownReviewer = readFileSync(reviewersPath, 'utf8');
     const unknownReviewerResponse = await handleRequest({
@@ -397,7 +496,7 @@ Keep this note.
       },
     });
     assert.equal(unknownReviewerResponse.result.isError, true);
-    assert.match(unknownReviewerResponse.result.content[0].text, /human verification/);
+    assert.match(unknownReviewerResponse.result.content[0].text, /local reviewer/);
     assert.equal(readFileSync(reviewersPath, 'utf8'), registryBeforeUnknownReviewer);
     assert.equal(JSON.parse(
       (await handleRequest({
@@ -419,8 +518,10 @@ Keep this note.
       },
     });
     assert.equal(employeeReviewerResponse.result.isError, true);
-    assert.match(employeeReviewerResponse.result.content[0].text, /human verification/);
+    assert.match(employeeReviewerResponse.result.content[0].text, /local reviewer/);
     assert.equal(readFileSync(reviewersPath, 'utf8'), registryBeforeUnknownReviewer);
+    assert.equal(readFileSync(tasksPath, 'utf8'), beforeRejectedApprovals);
+    assert.equal(readFileSync(taskOnePath, 'utf8'), afterAccepted);
 
 
     const doneResponse = await handleRequest({
@@ -428,11 +529,12 @@ Keep this note.
       id: 8,
       method: 'tools/call',
       params: {
-        name: 'sprintdesk_updateTask',
+        name: 'sprintdesk_commitHumanReview',
         arguments: {
-          taskId: 'SPD-1',
-          status: 'done',
-          humanVerification: { reviewerId: 'reviewer-2', notes: 'Reviewed and approved.' },
+          receipt: signReceipt({
+            ...acceptedPayload, intent: 'complete', operationId: randomUUID(), sequence: 3,
+            reviewOperationId: acceptedPayload.operationId,
+          }, testPrivateKey),
         },
       },
     });
@@ -443,10 +545,19 @@ Keep this note.
       reviewerId: 'reviewer-2',
       reviewerName: 'Second Reviewer',
       approvedAt: doneTask.humanVerification.approvedAt,
-      notes: 'Reviewed and approved.',
     });
     const afterDone = readFileSync(taskOnePath, 'utf8');
     assert.equal(afterDone, afterAccepted);
+    const approvalAuditResponse = await handleRequest({
+      jsonrpc: '2.0', id: 81, method: 'tools/call',
+      params: { name: 'sprintdesk_auditList', arguments: { actor: 'reviewer-2', targetType: 'task' } },
+    });
+    const approvalAudit = JSON.parse(approvalAuditResponse.result.content[0].text) as {
+      id: string; action: string;
+    }[];
+    assert.equal(approvalAudit.filter(entry => entry.action === 'review').length, 2);
+    assert.equal(approvalAudit.filter(entry => entry.action === 'approve').length, 1);
+    assert.equal(new Set(approvalAudit.map(entry => entry.id)).size, 3);
 
     const beforeRefresh = readFileSync(tasksPath, 'utf8');
     let refreshCalls = 0;
@@ -481,9 +592,9 @@ Keep this note.
     ]);
     assert.equal(readFileSync(tasksPath, 'utf8'), beforeRefresh);
 
-    writeFileSync(
+    appendTaskFixture(
       tasksPath,
-      `${beforeRefresh}  - id: task-2
+      `  - id: task-2
     number: 2
     code: SPD-2
     name: document-package
@@ -573,9 +684,9 @@ Keep this note.
     assert.match(repeatIncompleteAssignmentResponse.result.content[0].text, /added to sprint/);
     assert.equal(readFileSync(taskTwoPath, 'utf8'), afterIncompleteAssignment);
 
-    writeFileSync(
+    appendTaskFixture(
       tasksPath,
-      `${readFileSync(tasksPath, 'utf8')}  - id: task-3
+      `  - id: task-3
     number: 3
     code: SPD-3
     name: document-empty
