@@ -238,6 +238,11 @@
         "command": "sprintdesk.syncWorkforceFromTeam",
         "title": "SprintDesk: Sync Workforce from Team",
         "icon": "$(sync)"
+      },
+      {
+        "command": "sprintdesk.listHumanReviewers",
+        "title": "SprintDesk: List Human Reviewers",
+        "icon": "$(organization)"
       }
     ],
     "viewsContainers": {
@@ -290,6 +295,11 @@
         {
           "command": "sprintdesk.addTask",
           "title": "SprintDesk: Create New Task",
+          "when": "workspaceHasSprintDesk"
+        },
+        {
+          "command": "sprintdesk.listHumanReviewers",
+          "title": "SprintDesk: List Human Reviewers",
           "when": "workspaceHasSprintDesk"
         }
       ],

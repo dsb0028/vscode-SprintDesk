@@ -126,6 +126,7 @@ Keep this note.
     const toolNames = toolsResponse.result.tools.map((tool: { name: string }) => tool.name);
     assert.ok(toolNames.includes('sprintdesk_refresh'));
     assert.ok(toolNames.includes('sprintdesk_registerHumanReviewer'));
+    assert.ok(toolNames.includes('sprintdesk_listHumanReviewers'));
     const updateTaskTool = toolsResponse.result.tools.find((tool: { name: string }) => tool.name === 'sprintdesk_updateTask');
     assert.ok(updateTaskTool.inputSchema.properties.status.enum.includes('under-review'));
     assert.ok(updateTaskTool.inputSchema.properties.humanVerification);
@@ -186,6 +187,23 @@ Keep this note.
       },
     });
     assert.equal(invalidRegistration.result.isError, true);
+
+    writeFileSync(reviewersPath, 'reviewers: []\n');
+    const emptyListResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 20,
+      method: 'tools/call',
+      params: { name: 'sprintdesk_listHumanReviewers', arguments: {} },
+    });
+    assert.equal(emptyListResponse.result.isError, undefined);
+    assert.deepEqual(JSON.parse(emptyListResponse.result.content[0].text), []);
+    writeFileSync(
+      reviewersPath,
+      `reviewers:
+  - id: reviewer-2
+    displayName: Second Reviewer
+`,
+    );
 
     const completeResponse = await handleRequest({
       jsonrpc: '2.0',

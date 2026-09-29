@@ -176,6 +176,22 @@ async function handle_sprintdesk_registerHumanReviewer(args: any): Promise<Handl
   }
 }
 
+async function handle_sprintdesk_listHumanReviewers(_args: any): Promise<HandlerResult> {
+  try {
+    const reviewers = workforceService.listHumanReviewers();
+    return res(JSON.stringify(reviewers, null, 2));
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unable to list human reviewers';
+    recordAudit({
+      actor: 'mcp',
+      action: 'list_rejected',
+      targetType: 'human-reviewer',
+      details: { reason: message },
+    });
+    return res(message, true);
+  }
+}
+
 export const AGENT_HANDLERS: Record<string, Handler> = {
   sprintdesk_listTeam: handle_sprintdesk_listTeam,
   sprintdesk_syncTeamFromGit: handle_sprintdesk_syncTeamFromGit,
@@ -185,4 +201,5 @@ export const AGENT_HANDLERS: Record<string, Handler> = {
   sprintdesk_agentsList: handle_sprintdesk_agentsList,
   sprintdesk_agentsGet: handle_sprintdesk_agentsGet,
   sprintdesk_registerHumanReviewer: handle_sprintdesk_registerHumanReviewer,
+  sprintdesk_listHumanReviewers: handle_sprintdesk_listHumanReviewers,
 };

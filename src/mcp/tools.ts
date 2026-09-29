@@ -107,6 +107,14 @@ export const REVIEWER_TOOLS = [
       required: ['reviewerId', 'name'],
     },
   },
+  {
+    name: 'sprintdesk_listHumanReviewers',
+    description: 'List all registered human reviewers for task human verification',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+    },
+  },
 ];
 
 export const EPIC_TOOLS = [

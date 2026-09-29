@@ -51,6 +51,7 @@ import { createSprintInteractive, addExistingTasksToSprint, startFeatureFromTask
 import { createEpicInteractive } from './commands/interactive/epicInteractive';
 import { addTaskToBacklogInteractive, addExistingTasksToBacklog, createBacklogInteractive } from './commands/interactive/backlogInteractive';
 import * as teamService from './services/team/teamService';
+import * as workforceService from './services/workforce/workforceService';
 import { registerWorkforceCommands } from './commands/workforce/workforceCommands';
 // Tasks - import and create wrapper for API compatibility
 import { createTask as createTaskService } from "./services/taskService";
@@ -353,6 +354,23 @@ vscode.commands.registerCommand('sprintdesk.runAgent', async (item: any) => {
 
 // Settings commands
   registerOpenSettingsCommand(context);
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('sprintdesk.listHumanReviewers', async () => {
+      try {
+        const reviewers = workforceService.listHumanReviewers();
+        if (reviewers.length === 0) {
+          vscode.window.showInformationMessage('No registered human reviewers.');
+          return;
+        }
+        const lines = reviewers.map((reviewer: { displayName: string; id: string }) => `${reviewer.displayName} (${reviewer.id})`);
+        vscode.window.showInformationMessage(lines.join(', '));
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Unable to list human reviewers';
+        vscode.window.showErrorMessage(message);
+      }
+    })
+  );
 
   // MCP server - auto-start on extension load
   const { createMcpHttpTransport } = require('./mcp/httpServer');
