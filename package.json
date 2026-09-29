@@ -30,6 +30,7 @@
     "package:wv": "webpack --mode production --config ./webpack/webview.config.js",
     "compile-tests": "tsc -p . --outDir out --noEmit false",
     "test:calendar": "npm run compile-tests && node out/calendar/sprintCalendar.test.js",
+    "test:data-service": "npm run compile-tests && node out/data/DataService.test.js",
     "test:task-statuses": "npm run compile-tests && node out/providers/taskStatusGroups.test.js",
     "test:backlog-priorities": "npm run compile-tests && node out/providers/backlogPriorities.test.js",
     "test:mcp": "npm run compile-tests && node out/mcp/core.test.js",

@@ -21,10 +21,21 @@ function getRefreshSnapshot(response: any): Record<string, unknown> {
   return JSON.parse(response.result.content[0].text) as Record<string, unknown>;
 }
 
+function assertSingleTaskTemplateHeaders(markdown: string): void {
+  const headingCounts = [
+    /^# 🧩 Task:/gm,
+    /^## 📋 Description$/gm,
+    /^## ✅ Acceptance Criteria$/gm,
+    /^## 📝 Notes$/gm,
+  ].map(pattern => markdown.match(pattern)?.length ?? 0);
+  assert.deepEqual(headingCounts, [1, 1, 1, 1]);
+}
+
 async function runMcpCoreTests(): Promise<void> {
   const workspace = join(process.cwd(), 'out', '.sprintdesk-mcp-test-workspace');
   const dataDirectory = join(workspace, '.SprintDesk', 'data');
   const workforceDirectory = join(workspace, '.SprintDesk', 'workforce');
+  const tasksDirectory = join(workspace, '.SprintDesk', 'Tasks');
   const tasksPath = join(dataDirectory, 'tasks.yml');
   const backlogsPath = join(dataDirectory, 'backlogs.yml');
 
@@ -64,7 +75,33 @@ async function runMcpCoreTests(): Promise<void> {
 `,
     );
     writeFileSync(join(dataDirectory, 'epics.yml'), 'epics: []\n');
-    writeFileSync(join(dataDirectory, 'sprints.yml'), 'sprints: []\n');
+    writeFileSync(
+      join(dataDirectory, 'sprints.yml'),
+      `sprints:
+  - id: sprint-1
+    number: 1
+    title: Sprint 1
+    name: sprint-1
+    startDate: '2026-01-01'
+    endDate: '2026-01-14'
+    status: planned
+    tasks: []
+    createdAt: '2026-01-01T00:00:00.000Z'
+    updatedAt: '2026-01-01T00:00:00.000Z'
+`,
+    );
+    mkdirSync(tasksDirectory, { recursive: true });
+    writeFileSync(
+      join(tasksDirectory, '[SPD-1]_document-module.md'),
+      `# 🧩 Task: Document module
+
+## 📋 Description
+Keep this description.
+
+## 📝 Notes
+Keep this note.
+`,
+    );
     mkdirSync(workforceDirectory, { recursive: true });
     writeFileSync(
       join(workforceDirectory, 'employees.yml'),
@@ -98,6 +135,21 @@ async function runMcpCoreTests(): Promise<void> {
     const underReviewTask = JSON.parse(completeResponse.result.content[0].text);
     assert.equal(underReviewTask.status, 'under-review');
     assert.equal(underReviewTask.workStatus, 'review');
+    const taskOnePath = join(tasksDirectory, '[SPD-1]_document-module.md');
+    const afterUnderReview = readFileSync(taskOnePath, 'utf8');
+    assertSingleTaskTemplateHeaders(afterUnderReview);
+    assert.match(afterUnderReview, /Keep this description\./);
+    assert.match(afterUnderReview, /Keep this note\./);
+
+    const repeatedStatusResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 13,
+      method: 'tools/call',
+      params: { name: 'sprintdesk_updateTask', arguments: { taskId: 'SPD-1', status: 'under-review' } },
+    });
+    const repeatedStatusTask = JSON.parse(repeatedStatusResponse.result.content[0].text);
+    assert.equal(repeatedStatusTask.status, 'under-review');
+    assert.equal(readFileSync(taskOnePath, 'utf8'), afterUnderReview);
 
     const missingReviewResponse = await handleRequest({
       jsonrpc: '2.0',
@@ -130,6 +182,8 @@ async function runMcpCoreTests(): Promise<void> {
       approvedAt: doneTask.humanVerification.approvedAt,
       notes: 'Reviewed and approved.',
     });
+    const afterDone = readFileSync(taskOnePath, 'utf8');
+    assert.equal(afterDone, afterUnderReview);
 
     const beforeRefresh = readFileSync(tasksPath, 'utf8');
     let refreshCalls = 0;
@@ -152,7 +206,7 @@ async function runMcpCoreTests(): Promise<void> {
     assert.deepEqual(httpSnapshot.counts, {
       tasks: 1,
       epics: 0,
-      sprints: 0,
+      sprints: 1,
       backlogs: 1,
       runs: 0,
       events: 0,
@@ -198,13 +252,108 @@ async function runMcpCoreTests(): Promise<void> {
     assert.deepEqual(stdioSnapshot.counts, {
       tasks: 2,
       epics: 0,
-      sprints: 0,
+      sprints: 1,
       backlogs: 1,
       runs: 0,
       events: 0,
       employees: 1,
     });
     assert.equal(refreshCalls, 1);
+
+    writeFileSync(
+      join(tasksDirectory, '[SPD-2]_document-package.md'),
+      `# 🧩 Task: Document package
+
+## ✅ Acceptance Criteria
+- [ ] Keep this criterion.
+`,
+    );
+    const addCompleteTaskToSprintResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 9,
+      method: 'tools/call',
+      params: { name: 'sprintdesk_addTaskToSprint', arguments: { sprintId: 'sprint-1', taskId: 'SPD-1' } },
+    });
+    assert.match(addCompleteTaskToSprintResponse.result.content[0].text, /added to sprint/);
+    const afterFirstAssignment = readFileSync(taskOnePath, 'utf8');
+    assert.equal(afterFirstAssignment, afterDone);
+
+    const repeatAssignmentResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 10,
+      method: 'tools/call',
+      params: { name: 'sprintdesk_addTaskToSprint', arguments: { sprintId: 'sprint-1', taskId: 'SPD-1' } },
+    });
+    assert.match(repeatAssignmentResponse.result.content[0].text, /added to sprint/);
+    assert.equal(readFileSync(taskOnePath, 'utf8'), afterFirstAssignment);
+
+    const addIncompleteTaskToSprintResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 11,
+      method: 'tools/call',
+      params: { name: 'sprintdesk_addTaskToSprint', arguments: { sprintId: 'sprint-1', taskId: 'SPD-2' } },
+    });
+    assert.match(addIncompleteTaskToSprintResponse.result.content[0].text, /added to sprint/);
+    const taskTwoPath = join(tasksDirectory, '[SPD-2]_document-package.md');
+    const afterIncompleteAssignment = readFileSync(taskTwoPath, 'utf8');
+    assertSingleTaskTemplateHeaders(afterIncompleteAssignment);
+    assert.match(afterIncompleteAssignment, /- \[ \] Keep this criterion\./);
+
+    const repeatIncompleteAssignmentResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 12,
+      method: 'tools/call',
+      params: { name: 'sprintdesk_addTaskToSprint', arguments: { sprintId: 'sprint-1', taskId: 'SPD-2' } },
+    });
+    assert.match(repeatIncompleteAssignmentResponse.result.content[0].text, /added to sprint/);
+    assert.equal(readFileSync(taskTwoPath, 'utf8'), afterIncompleteAssignment);
+
+    writeFileSync(
+      tasksPath,
+      `${readFileSync(tasksPath, 'utf8')}  - id: task-3
+    number: 3
+    code: SPD-3
+    name: document-empty
+    title: Document empty
+    type: doc
+    status: waiting
+    priority: high
+    epic: null
+    backlog: technical
+    sprint: null
+    createdAt: '2026-01-01T00:00:00.000Z'
+    updatedAt: '2026-01-01T00:00:00.000Z'
+`,
+    );
+    const taskThreePath = join(tasksDirectory, '[SPD-3]_document-empty.md');
+    const emptyTaskTemplate = `# 🧩 Task: Document empty
+
+## 📋 Description
+
+## ✅ Acceptance Criteria
+
+## 📝 Notes
+`;
+    writeFileSync(taskThreePath, emptyTaskTemplate);
+    const emptyStatusResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 14,
+      method: 'tools/call',
+      params: { name: 'sprintdesk_updateTask', arguments: { taskId: 'SPD-3', status: 'waiting' } },
+    });
+    const emptyStatusTask = JSON.parse(emptyStatusResponse.result.content[0].text);
+    assert.equal(emptyStatusTask.status, 'waiting');
+    assert.equal(readFileSync(taskThreePath, 'utf8'), emptyTaskTemplate);
+
+    const repeatedEmptyStatusResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 15,
+      method: 'tools/call',
+      params: { name: 'sprintdesk_updateTask', arguments: { taskId: 'SPD-3', status: 'waiting' } },
+    });
+    const repeatedEmptyStatusTask = JSON.parse(repeatedEmptyStatusResponse.result.content[0].text);
+    assert.equal(repeatedEmptyStatusTask.status, 'waiting');
+    assert.equal(readFileSync(taskThreePath, 'utf8'), emptyTaskTemplate);
 
     const errorResult = await handleRequest({
       jsonrpc: '2.0',

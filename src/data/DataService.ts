@@ -7,6 +7,11 @@ const SPRINTDESK_DIR = '.SprintDesk';
 const SETTINGS_DIR = 'settings';
 const DATA_DIR = 'data';
 
+interface TaskTemplateField {
+  heading: string;
+  matches: (line: string) => boolean;
+}
+
 export class DataService {
   private workspaceRoot: string;
   private configCache: Config | null = null;
@@ -486,6 +491,80 @@ getTask(taskId: string): Task | undefined {
     return md;
   }
 
+  private completeTaskTemplate(task: Task, content: string): string {
+    const fields: TaskTemplateField[] = [
+      {
+        heading: `# 🧩 Task: ${task.title}`,
+        matches: line => /^# 🧩 Task:.*$/.test(line),
+      },
+      {
+        heading: '## 📋 Description',
+        matches: line => line === '## 📋 Description',
+      },
+      {
+        heading: '## ✅ Acceptance Criteria',
+        matches: line => line === '## ✅ Acceptance Criteria',
+      },
+      {
+        heading: '## 📝 Notes',
+        matches: line => line === '## 📝 Notes',
+      },
+    ];
+    const lineEnding = content.includes('\r\n') ? '\r\n' : '\n';
+    const lines = content.split(lineEnding);
+    const fieldIndexes = this.findTaskTemplateFieldIndexes(lines, fields);
+    const hasTemplateField = fieldIndexes.some(index => index !== -1);
+
+    if (!hasTemplateField) {
+      return this.generateTaskMd(task, content);
+    }
+
+    for (let fieldIndex = 0; fieldIndex < fields.length; fieldIndex += 1) {
+      const currentFieldIndexes = this.findTaskTemplateFieldIndexes(lines, fields);
+      if (currentFieldIndexes[fieldIndex] !== -1) {
+        continue;
+      }
+
+      const nextFieldIndex = currentFieldIndexes
+        .slice(fieldIndex + 1)
+        .find(index => index !== -1);
+      const insertionIndex = nextFieldIndex === undefined ? lines.length : nextFieldIndex;
+      lines.splice(insertionIndex, 0, fields[fieldIndex].heading, '');
+    }
+
+    return lines.join(lineEnding);
+  }
+
+  private findTaskTemplateFieldIndexes(lines: string[], fields: TaskTemplateField[]): number[] {
+    const indexes = fields.map(() => -1);
+    let fencedCodeDelimiter: string | undefined;
+
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+      const line = lines[lineIndex];
+      const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/);
+      if (fenceMatch) {
+        const delimiter = fenceMatch[1][0];
+        if (!fencedCodeDelimiter) {
+          fencedCodeDelimiter = delimiter;
+        } else if (fencedCodeDelimiter === delimiter) {
+          fencedCodeDelimiter = undefined;
+        }
+        continue;
+      }
+      if (fencedCodeDelimiter) {
+        continue;
+      }
+
+      for (let fieldIndex = 0; fieldIndex < fields.length; fieldIndex += 1) {
+        if (indexes[fieldIndex] === -1 && fields[fieldIndex].matches(line)) {
+          indexes[fieldIndex] = lineIndex;
+        }
+      }
+    }
+
+    return indexes;
+  }
+
   public slugifyTitle(title: string): string {
     return (title || '')
       .toString()
@@ -591,7 +670,9 @@ getTask(taskId: string): Task | undefined {
       }
     }
 
-    const md = this.generateTaskMd(task, additionalContent);
+    const md = additionalContent === undefined
+      ? this.generateTaskMd(task)
+      : this.completeTaskTemplate(task, additionalContent);
     this.fileSystem.writeFile(newFilePath, md);
 
     // remove legacy id-based file if it exists and is different
