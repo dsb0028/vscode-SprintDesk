@@ -35,6 +35,7 @@ export class BacklogsTreeItem extends vscode.TreeItem {
       this.id = `backlog-priority:${backlogId}:${priority}`;
       this.contextValue = 'backlogPriorityGroup';
       this.iconPath = new vscode.ThemeIcon('folder');
+      this.description = `${UI_CONSTANTS.EMOJI.COMMON.TASK_LIST} ${taskCount ?? 0} tasks`;
       this.tooltip = `${label} priority tasks`;
     } else if (filePath) {
       // Setup backlog item
@@ -227,10 +228,13 @@ private async addTaskToBacklog(backlogPath: string, taskPath: string): Promise<v
   private async removeTaskFromBacklog(backlogPath: string, taskPath: string): Promise<void> {
     backlogService.removeTaskFromBacklog(backlogPath, taskPath);
   }
+  private getPriorityMembers(backlogId: string, priority: Task['priority']): Task[] {
+    const dataService = getDataService(this.getWorkspaceRoot());
+    return dataService.getTasksByBacklog(backlogId).filter(task => task.priority === priority);
+  }
   private getPriorityTasks(backlogId: string, priority: Task['priority']): BacklogsTreeItem[] {
     const dataService = getDataService(this.getWorkspaceRoot());
-    const tasks = dataService.getTasksByBacklog(backlogId);
-    return tasks.filter(task => task.priority === priority).map(task => {
+    return this.getPriorityMembers(backlogId, priority).map(task => {
       const taskPath = path.join(dataService.getTasksDir(), dataService.getTaskFilename(task));
       const treeItem = new BacklogsTreeItem(
         task.title,
@@ -419,7 +423,7 @@ private async addTaskToBacklog(backlogPath: string, taskPath: string): Promise<v
         undefined,
         backlog.id,
         undefined,
-        undefined,
+        this.getPriorityMembers(backlog.id, group.priority).length,
         group.priority
       ));
     }

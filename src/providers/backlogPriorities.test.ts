@@ -9,7 +9,7 @@ import type { DataTransfer, DataTransferItem } from 'vscode';
 import { DataService } from '../data/DataService';
 import { Backlog, Task } from '../data/types';
 import { NodeHost, setHost } from '../host';
-import type { BacklogsTreeItem } from './BacklogsTreeDataProvider';
+import type { BacklogsTreeDataProvider, BacklogsTreeItem } from './BacklogsTreeDataProvider';
 
 class TreeItemDouble {
   constructor(public label: string, public collapsibleState: number) {}
@@ -20,8 +20,9 @@ class MarkdownDouble {
 }
 
 class EventDouble {
+  static readonly changes: unknown[] = [];
   readonly event = (): void => {};
-  fire(): void {}
+  fire(value: unknown): void { EventDouble.changes.push(value); }
 }
 
 class TransferItemDouble {
@@ -75,6 +76,24 @@ function ids(items: BacklogsTreeItem[]): string[] {
     assert.ok(item.taskId);
     return item.taskId;
   });
+}
+
+async function assertCounts(
+  provider: BacklogsTreeDataProvider, backlogId: string, counts: number[]
+): Promise<void> {
+  const roots = await provider.getChildren();
+  const parent = roots.find(item => item.backlogId === backlogId);
+  assert.ok(parent);
+  const groups = await provider.getChildren(parent);
+  assert.deepEqual(Array.from(groups, group => group.label), ['High', 'Medium', 'Low']);
+  assert.deepEqual(Array.from(groups, group => group.description),
+    counts.map(count => `📋 ${count} tasks`));
+  for (const [index, group] of groups.entries()) {
+    assert.equal(group.collapsibleState, 1);
+    assert.equal(provider.getTreeItem(group).description, `📋 ${counts[index]} tasks`);
+    assert.equal((await provider.getChildren(group)).length, counts[index]);
+    assert.equal(group.description, `📋 ${counts[index]} tasks`);
+  }
 }
 
 async function run(): Promise<void> {
@@ -144,6 +163,9 @@ async function run(): Promise<void> {
     }, { filename: providerPath });
     assert.ok(exports.BacklogsTreeDataProvider);
     const provider = new exports.BacklogsTreeDataProvider();
+    await assertCounts(provider, 'features', [2, 1, 1]);
+    await assertCounts(provider, 'bugs', [0, 1, 1]);
+    await assertCounts(provider, 'empty', [0, 0, 0]);
     const roots = await provider.getChildren();
     assert.deepEqual(Array.from(roots, item => item.label), ['bugs', 'empty', 'features']);
     const features = roots[2];
@@ -207,13 +229,41 @@ async function run(): Promise<void> {
     tasks[1].backlog = 'bugs';
     persist(root, tasks, backlogs);
     const changed = snapshot(root);
+    const eventsBefore = EventDouble.changes.length;
     provider.refresh();
+    assert.equal(EventDouble.changes.length, eventsBefore + 1);
+    assert.equal(EventDouble.changes[EventDouble.changes.length - 1], undefined);
+    await assertCounts(provider, 'features', [1, 1, 1]);
+    await assertCounts(provider, 'bugs', [0, 1, 2]);
     assert.deepEqual(ids(await provider.getChildren(groups[0])), ['task-4']);
     assert.deepEqual(ids(await provider.getChildren(groups[2])), ['task-1']);
     assert.deepEqual(ids(await provider.getChildren(bugs[2])), ['task-2', 'task-6']);
     assert.deepEqual(snapshot(root), changed);
 
+    const created = task(8, 'medium', 'waiting');
+    tasks.push(created);
+    backlogs[0].tasks.push(created.id);
+    persist(root, tasks, backlogs);
+    const afterCreate = snapshot(root);
+    provider.refresh();
+    await assertCounts(provider, 'features', [1, 2, 1]);
+    await assertCounts(provider, 'bugs', [0, 1, 2]);
+    assert.deepEqual(snapshot(root), afterCreate);
+
+    tasks.splice(tasks.findIndex(item => item.id === 'task-3'), 1);
+    backlogs[0].tasks = backlogs[0].tasks.filter(id => id !== 'task-3');
+    persist(root, tasks, backlogs);
+    const afterDelete = snapshot(root);
+    provider.refresh();
+    await assertCounts(provider, 'features', [1, 1, 1]);
+    await assertCounts(provider, 'bugs', [0, 1, 2]);
+    const reopened = new exports.BacklogsTreeDataProvider();
+    await assertCounts(reopened, 'features', [1, 1, 1]);
+    await assertCounts(reopened, 'bugs', [0, 1, 2]);
+    assert.deepEqual(snapshot(root), afterDelete);
+
     provider.setWorkspaceRoot(selectedRoot);
+    await assertCounts(provider, 'features', [0, 0, 1]);
     const selectedBacklogs = await provider.getChildren();
     const selectedGroups = await provider.getChildren(selectedBacklogs[0]);
     assert.deepEqual(ids(await provider.getChildren(selectedGroups[2])), ['task-7']);

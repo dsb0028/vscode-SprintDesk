@@ -41,13 +41,17 @@ A productivity extension for managing tasks, epics, backlogs, and sprints direct
 
 Expand a backlog in the **Backlogs** pane to see **High**, **Medium**, and
 **Low** priority groups, in that order. All three groups remain available even
-when empty. Expand a group to open or drag its tasks as before; drop tasks on
-the backlog itself, not on a priority heading.
+when empty. Each group shows its name followed by a clipboard and its task count,
+for example **Medium 📋 3 tasks**. Counts belong to that backlog and priority,
+remain visible while the group is collapsed, and use **0 tasks** for empty groups
+and **1 tasks** for a single task. Expand a group to open or drag its tasks as
+before; drop tasks on the backlog itself, not on a priority heading.
 
 Grouping uses stored task priority and backlog membership. It does not filter
 out completed tasks or tasks assigned to sprints, change task metadata, or
 alter the status groups in the **Tasks** pane. Refresh SprintDesk after editing
-priority or backlog membership to update the displayed groups.
+priority or backlog membership, or creating/deleting tasks, to update the
+displayed groups and counts. Reopening SprintDesk reads the persisted counts.
 
 Run the focused provider regression tests with `npm run test:backlog-priorities`.
 
