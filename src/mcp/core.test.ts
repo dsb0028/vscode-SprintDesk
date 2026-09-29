@@ -6,10 +6,10 @@ import { NodeFileSystem } from '../host/NodeFileSystem';
 import { IHost } from '../host/IHost';
 import { handleRequest } from './core';
 
-function createHost(workspaceRoot: string): IHost {
+function createHost(workspaceRoot: string, config: Record<string, unknown> = {}): IHost {
   return {
     getWorkspaceRoot: () => workspaceRoot,
-    getConfig: <T>(_key: string, defaultValue?: T) => defaultValue as T,
+    getConfig: <T>(key: string, defaultValue?: T) => (config[key] === undefined ? defaultValue : config[key]) as T,
     showMessage: () => undefined,
     getGitUser: async () => undefined,
     execSync: () => ({ stdout: '', stderr: '' }),
@@ -122,9 +122,60 @@ Keep this note.
     });
     const toolNames = toolsResponse.result.tools.map((tool: { name: string }) => tool.name);
     assert.ok(toolNames.includes('sprintdesk_refresh'));
+    assert.ok(toolNames.includes('sprintdesk_registerHumanReviewer'));
     const updateTaskTool = toolsResponse.result.tools.find((tool: { name: string }) => tool.name === 'sprintdesk_updateTask');
     assert.ok(updateTaskTool.inputSchema.properties.status.enum.includes('under-review'));
     assert.ok(updateTaskTool.inputSchema.properties.humanVerification);
+
+    const unauthorizedRegistration = await handleRequest({
+      jsonrpc: '2.0',
+      id: 16,
+      method: 'tools/call',
+      params: {
+        name: 'sprintdesk_registerHumanReviewer',
+        arguments: { reviewerId: 'reviewer-2', name: 'Second Reviewer' },
+      },
+    });
+    assert.equal(unauthorizedRegistration.result.isError, true);
+    assert.match(unauthorizedRegistration.result.content[0].text, /disabled/);
+
+    setHost(createHost(workspace, { reviewerRegistrationEnabled: true }));
+    const registrationResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 17,
+      method: 'tools/call',
+      params: {
+        name: 'sprintdesk_registerHumanReviewer',
+        arguments: { reviewerId: ' reviewer-2 ', name: ' Second Reviewer ' },
+      },
+    });
+    const registeredReviewer = JSON.parse(registrationResponse.result.content[0].text);
+    assert.equal(registeredReviewer.id, 'reviewer-2');
+    assert.equal(registeredReviewer.name, 'Second Reviewer');
+    assert.match(readFileSync(join(workforceDirectory, 'employees.yml'), 'utf8'), /id: reviewer-2/);
+
+    const duplicateRegistration = await handleRequest({
+      jsonrpc: '2.0',
+      id: 18,
+      method: 'tools/call',
+      params: {
+        name: 'sprintdesk_registerHumanReviewer',
+        arguments: { reviewerId: 'reviewer-2', name: 'Second Reviewer' },
+      },
+    });
+    assert.equal(duplicateRegistration.result.isError, true);
+    assert.match(duplicateRegistration.result.content[0].text, /already registered/);
+
+    const invalidRegistration = await handleRequest({
+      jsonrpc: '2.0',
+      id: 19,
+      method: 'tools/call',
+      params: {
+        name: 'sprintdesk_registerHumanReviewer',
+        arguments: { reviewerId: '', name: 'Invalid Reviewer' },
+      },
+    });
+    assert.equal(invalidRegistration.result.isError, true);
 
     const completeResponse = await handleRequest({
       jsonrpc: '2.0',
@@ -169,7 +220,7 @@ Keep this note.
         arguments: {
           taskId: 'SPD-1',
           status: 'done',
-          humanVerification: { reviewerId: 'reviewer-1', notes: 'Reviewed and approved.' },
+          humanVerification: { reviewerId: 'reviewer-2', notes: 'Reviewed and approved.' },
         },
       },
     });
@@ -177,8 +228,8 @@ Keep this note.
     assert.equal(doneTask.status, 'done');
     assert.equal(doneTask.workStatus, 'done');
     assert.deepEqual(doneTask.humanVerification, {
-      reviewerId: 'reviewer-1',
-      reviewerName: 'Human Reviewer',
+      reviewerId: 'reviewer-2',
+      reviewerName: 'Second Reviewer',
       approvedAt: doneTask.humanVerification.approvedAt,
       notes: 'Reviewed and approved.',
     });
@@ -210,7 +261,7 @@ Keep this note.
       backlogs: 1,
       runs: 0,
       events: 0,
-      employees: 1,
+      employees: 2,
     });
     assert.deepEqual(httpSnapshot.backlogTaskCounts, [
       { id: 'technical', title: 'TECHNICAL', taskCount: 1 },
@@ -256,7 +307,7 @@ Keep this note.
       backlogs: 1,
       runs: 0,
       events: 0,
-      employees: 1,
+      employees: 2,
     });
     assert.equal(refreshCalls, 1);
 

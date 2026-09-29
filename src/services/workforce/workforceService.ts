@@ -83,6 +83,50 @@ export function addEmployee(input: {
   return employee;
 }
 
+export function registerHumanReviewer(input: {
+  reviewerId: string;
+  name: string;
+}): Employee {
+  const reviewerId = input.reviewerId.trim();
+  const name = input.name.trim().replace(/\s+/g, ' ');
+  if (!reviewerId || reviewerId.length > 128) {
+    throw new Error('reviewerId must be between 1 and 128 characters');
+  }
+  if (!name || name.length > 200) {
+    throw new Error('name must be between 1 and 200 characters');
+  }
+
+  const existing = getStores().employees.getById(reviewerId);
+  if (existing) {
+    throw new Error(`Reviewer already registered: ${reviewerId}`);
+  }
+  if (teamService.getAgents().some(agent => agent.id === reviewerId)) {
+    throw new Error(`Reviewer ID is already in use: ${reviewerId}`);
+  }
+
+  const duplicateName = getStores().employees.loadAll().find(
+    employee => employee.role === 'human' && employee.name.trim() === name,
+  );
+  if (duplicateName) {
+    throw new Error(`Reviewer already registered: ${duplicateName.id}`);
+  }
+  if (teamService.getAgents().some(agent => agent.name.trim() === name)) {
+    throw new Error(`Reviewer name is already in use: ${name}`);
+  }
+
+  const now = new Date().toISOString();
+  const reviewer: Employee = {
+    id: reviewerId,
+    name,
+    role: 'human',
+    status: 'idle',
+    createdAt: now,
+    updatedAt: now,
+  };
+  getStores().employees.add(reviewer);
+  return reviewer;
+}
+
 export function updateEmployee(
   employeeId: string,
   updates: Partial<Pick<Employee, 'name' | 'role' | 'capabilities' | 'status' | 'gitAuthor' | 'description'>>

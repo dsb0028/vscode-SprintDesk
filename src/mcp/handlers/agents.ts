@@ -1,6 +1,8 @@
 import * as teamService from '../../services/team/teamService';
+import * as workforceService from '../../services/workforce/workforceService';
 import { getStores } from '../../data/stores';
-import { Handler, HandlerResult, res, getWs, getDs } from './helpers';
+import { getHost } from '../../host';
+import { Handler, HandlerResult, res, getWs, getDs, recordAudit } from './helpers';
 
 async function handle_sprintdesk_listTeam(_args: any): Promise<HandlerResult> {
   const members = teamService.loadTeamMembers();
@@ -129,6 +131,52 @@ async function handle_sprintdesk_agentsGet(args: any): Promise<HandlerResult> {
   return res(`Agent not found: ${agentId}`, true);
 }
 
+async function handle_sprintdesk_registerHumanReviewer(args: any): Promise<HandlerResult> {
+  if (!getHost().getConfig<boolean>('reviewerRegistrationEnabled', false)) {
+    recordAudit({
+      actor: 'mcp',
+      action: 'register_rejected',
+      targetType: 'human-reviewer',
+      details: { reason: 'registration_disabled' },
+    });
+    return res('Human reviewer registration is disabled by administrator configuration', true);
+  }
+
+  const reviewerId = typeof args.reviewerId === 'string' ? args.reviewerId.trim() : '';
+  const name = typeof args.name === 'string' ? args.name.trim().replace(/\s+/g, ' ') : '';
+  if (!reviewerId || !name) {
+    recordAudit({
+      actor: 'mcp',
+      action: 'register_rejected',
+      targetType: 'human-reviewer',
+      details: { reason: 'invalid_input' },
+    });
+    return res('reviewerId and name are required', true);
+  }
+
+  try {
+    const reviewer = workforceService.registerHumanReviewer({ reviewerId, name });
+    recordAudit({
+      actor: 'mcp',
+      action: 'register',
+      targetType: 'human-reviewer',
+      targetId: reviewer.id,
+      details: { reviewerName: reviewer.name },
+    });
+    return res(JSON.stringify(reviewer, null, 2));
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unable to register human reviewer';
+    recordAudit({
+      actor: 'mcp',
+      action: 'register_rejected',
+      targetType: 'human-reviewer',
+      targetId: reviewerId || undefined,
+      details: { reason: message },
+    });
+    return res(message, true);
+  }
+}
+
 export const AGENT_HANDLERS: Record<string, Handler> = {
   sprintdesk_listTeam: handle_sprintdesk_listTeam,
   sprintdesk_syncTeamFromGit: handle_sprintdesk_syncTeamFromGit,
@@ -137,4 +185,5 @@ export const AGENT_HANDLERS: Record<string, Handler> = {
   sprintdesk_runAgent: handle_sprintdesk_runAgent,
   sprintdesk_agentsList: handle_sprintdesk_agentsList,
   sprintdesk_agentsGet: handle_sprintdesk_agentsGet,
+  sprintdesk_registerHumanReviewer: handle_sprintdesk_registerHumanReviewer,
 };

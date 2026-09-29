@@ -84,6 +84,31 @@ export const TASK_TOOLS = [
   },
 ];
 
+export const REVIEWER_TOOLS = [
+  {
+    name: 'sprintdesk_registerHumanReviewer',
+    description: 'Register a human reviewer for task human verification',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        reviewerId: {
+          type: 'string',
+          description: 'Stable reviewer identifier used by humanVerification.reviewerId',
+          minLength: 1,
+          maxLength: 128,
+        },
+        name: {
+          type: 'string',
+          description: 'Human reviewer display name',
+          minLength: 1,
+          maxLength: 200,
+        },
+      },
+      required: ['reviewerId', 'name'],
+    },
+  },
+];
+
 export const EPIC_TOOLS = [
   {
     name: 'sprintdesk_createEpic',
@@ -518,6 +543,7 @@ export const CONTEXT_TOOLS = [
 
 export const ALL_TOOLS = [
   ...TASK_TOOLS,
+  ...REVIEWER_TOOLS,
   ...EPIC_TOOLS,
   ...SPRINT_TOOLS,
   ...BACKLOG_TOOLS,

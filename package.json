@@ -453,6 +453,11 @@
       "type": "object",
       "title": "SprintDesk",
       "properties": {
+        "sprintdesk.reviewerRegistrationEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow the MCP server to register human reviewers for task verification."
+        },
         "sprintdesk.projectPrefix": {
           "type": "string",
           "default": "SPD",

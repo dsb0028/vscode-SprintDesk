@@ -60,6 +60,9 @@
       "sprintdesk_addTeamMember",
       "sprintdesk_removeTeamMember"
     ],
+    "humanVerification": [
+      "sprintdesk_registerHumanReviewer"
+    ],
     "history": [
       "sprintdesk_getHistory",
       "sprintdesk_trackChange"

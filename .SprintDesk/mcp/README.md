@@ -105,6 +105,21 @@ curl http://localhost:3847/health
 | `sprintdesk_addTeamMember` | Add a team member |
 | `sprintdesk_removeTeamMember` | Remove a team member |
 
+### Human Verification Tools
+| Tool | Description |
+|------|-------------|
+| `sprintdesk_registerHumanReviewer` | Register a human reviewer for task verification when `sprintdesk.reviewerRegistrationEnabled` is enabled |
+
+`sprintdesk_registerHumanReviewer` accepts `reviewerId` (1-128 characters)
+and `name` (1-200 characters). Both values are trimmed before validation;
+internal whitespace in names is normalized. The values are stored in
+`.SprintDesk/workforce/employees.yml`. The reviewer ID is the same
+value supplied later as `humanVerification.reviewerId`.
+Registration is rejected when the setting is disabled, either value is empty
+or oversized, or the normalized ID or human name is already registered.
+Registration outcomes are recorded in the audit store. Listing and removal are
+intentionally out of scope for this command.
+
 ### History Tools
 | Tool | Description |
 |------|-------------|
