@@ -6,6 +6,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- **Needs Modification (0.6.3):** A verified signed review containing one or
+  more `needs work` criteria atomically moves an `under-review` task to
+  `needs-modification`, retains the review receipt and feedback, and prevents
+  generic status assignment or completion from that outcome.
+
 ### Guided review (0.6.0, pending installation validation)
 
 - Separate local UI-only reviewer companion with independently retained keys,
