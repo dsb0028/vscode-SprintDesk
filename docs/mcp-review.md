@@ -20,6 +20,11 @@ to Done. Rejection leaves the task unchanged.
 
 Missing enrollment, invalid signatures, wrong intent/task/project/key, changed
 content, reused operations and stale sequence numbers fail explicitly.
+Cross-host command workspace mismatches report the requested path and the main
+extension's open-folder URI/path pairs for diagnosis. These contain folder
+locations, not signing keys. Preserve the existing local enrollment and retry
+its public mirror only after resolving the mismatch; do not recover a key
+merely because delivery failed.
 Exact repeated delivery is idempotent after checking content and projections.
 Task-YAML receipt/state/audit-history writes are atomic and protected by an
 exclusive writer lock on the Node host. Contention is an explicit error.

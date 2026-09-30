@@ -20,7 +20,7 @@ npm run package
 ```
 
 `package` type-checks, builds a production `dist/extension.js`, then writes
-`sprintdesk-local-reviewer-0.1.0.vsix`. Its ZIP packager is dependency-free and
+`sprintdesk-local-reviewer-0.1.3.vsix`. Its ZIP packager is dependency-free and
 includes the companion manifest, README, production bundle and bundled-source
 license notices. The bundle
 includes the frozen protocol, not the parent's enforcement/service modules.
@@ -33,6 +33,26 @@ with assigned, claimed and absent work status. The companion imports the shared
 `reviewedMarkdown` normalizer directly; it has no duplicate implementation.
 
 ## Human review workflow
+
+Version 0.1.2 supports desktop VS Code's `vscode-userdata` storage URI as well
+as native `file` storage. VS Code's
+[desktop provider](https://github.com/microsoft/vscode/blob/main/src/vs/workbench/electron-browser/desktop.main.ts)
+uses the local disk provider, and its
+[userdata adapter](https://github.com/microsoft/vscode/blob/main/src/vs/platform/userData/common/fileUserDataProvider.ts)
+maps the URI by replacing the scheme with `file`.
+The companion requires an absolute path with no authority, query or fragment.
+Before opening its ledger or creating keys, it writes a random non-secret local
+probe and verifies that `workspace.fs` reads the same bytes through the original
+URI. A mismatch or unavailable provider blocks enrollment; the probe is cleaned
+up. Placement checks, exclusive leases and durable ledger writes remain in force.
+Unsupported schemes are not redirected to a fallback storage location.
+
+Version 0.1.3 sends the pinned workspace URI, not the client's platform-specific
+`fsPath`, to main SprintDesk 0.6.2. The remote extension resolves that URI against
+its exact open-folder paths and uses its own native filesystem path. This avoids
+Windows-formatted backslashes being sent to a Linux SSH host. Enrollment mirror
+failures do not require a replacement key: use **Retry public enrollment mirror
+(same key)** after updating both components.
 
 1. Open **SprintDesk: Open Local Authenticated Review**. Select the exact workspace
    in multi-root windows. Open **Developer: Show Running Extensions** and verify
@@ -48,7 +68,11 @@ with assigned, claimed and absent work status. The companion imports the shared
    index, not the authoritative receipt ledger. Only the public enrollment is mirrored
    remotely. If mirroring fails, retry **the same enrollment**; never generate a
    replacement key automatically.
-3. Load an exact task ID in `under-review`. Read the complete plain-text snapshot.
+3. Load an exact task code or canonical ID in `under-review`. The companion
+   resolves it from bounded actual `tasks.yml` bytes in the pinned workspace,
+   rejects missing/ambiguous matches and duplicate IDs, and uses only the
+   canonical ID for local drafts, receipts and snapshot requests. It never
+   guesses by title. Read the complete plain-text snapshot.
    Choose additional UTF-8 workspace evidence files if needed; actual
    `workspace.fs` bytes must match the snapshot, including encoding/BOM/line
    endings. Non-UTF-8 files are rejected. Choosing new evidence resets decisions.
@@ -58,12 +82,54 @@ with assigned, claimed and absent work status. The companion imports the shared
    drafts require explicit discard; old decisions never transfer to new evidence.
    Observed drift durably invalidates the draft even if the source later reverts;
    explicit key/reviewer recovery also invalidates all saved decisions.
-5. Confirm the final displayed summary to sign **review only**. Completion
+5. Check the readable ordered criterion/decision summary and confirm
+   **Confirm and submit review** to sign **review only**. Completion
    requires an accepted, current all-met review, a separate completion summary,
    and a separate human confirmation. Every signing path starts exclusively from
    a valid webview confirmation event; the public command can only open the UI.
 
-The parent calls `sprintdeskReviewer.openReview(taskId)`. Its optional task ID
+### Reading the review panel
+
+The task code/title, canonical ID, reviewer, pinned project/workspace and actual
+task status remain visible. Workflow headings are not task status: **Review
+accepted - ready to complete** means the verified all-met review is submitted,
+but the task still remains Under Review. **Task is Done** is presented as verified
+only after independent completion readback. Busy or unverified readback instead
+requires checking the review/completion; a remote response alone is never success.
+
+The stepper, individual-decision count and **Draft saved locally** indicator
+describe current progress. Needs-evidence is unsigned and cannot submit.
+Review and completion are distinct steps: **Review completion for CODE - TITLE**
+opens the task-specific summary, then **Confirm and mark Done** authorizes
+completion. **Not now** leaves the submitted review in place without signing
+completion. Chat can explain evidence and results but never repeats or replaces
+these local approvals.
+
+The main evidence view presents bound task content and selected file bytes as
+plain text. No supplemental files selected does not mean evidence is missing:
+the task Markdown is still bound. Bounded previews disclose truncation; full
+bound content, raw YAML/Markdown, snapshot and local ledger remain available in
+expandable **Technical details**. Generated handoff and verification warnings
+remain visible outside that disclosure. Remote source is never executed.
+
+Progress reports actual local stages, including signing, durable intent save,
+submission and result checking. Controls are disabled while processing; progress
+messages do not supply a usable approval token. For uncertain delivery use
+**Check submission result** first; retry is available only for an existing
+pending receipt and sends those identical bytes without signing again.
+The diagnostic and safe next steps remain visible on failure.
+If local intent persistence fails, delivery is refused and the UI does not
+claim the intent is saved durably. A retry first persists that same signed
+intent under the local lease; continued storage failure cannot bypass this gate.
+
+**Authority and recovery** separates fresh review, key revocation, identity
+reset and recovery from everyday actions. Existing modal confirmations and
+pending-operation restrictions still apply. A transport failure is not a reason
+to replace your key. Keyboard-operable native controls, labeled inputs, visible
+focus and live status/error announcements support accessible navigation;
+confirmation buttons are never automatically focused.
+
+The parent calls `sprintdeskReviewer.openReview(taskId)`. Its optional exact code/ID
 only prefills a newly opened panel; it never submits decisions or signs, and it
 does not replace an existing open review. Loading and signing remain human UI
 actions. The companion exposes no signing command.
@@ -71,6 +137,8 @@ actions. The companion exposes no signing command.
 The webview uses a nonce CSP, no command URIs, no resources/network connections,
 plain-text remote data, exact action schemas, per-render event tokens, phase
 guards and serialized events. Ambiguous/duplicate criteria are refused.
+Presentation changes do not alter the protocol, key storage, ledger format,
+source verification or signing authority.
 
 ## Independent ledger and recovery
 
@@ -141,6 +209,13 @@ based on a remote key. Revocation is local: the hostile remote owner cannot be
 forced to erase a public mirror or an old accepted receipt.
 
 ## Pending real installation/UI gates
+
+The automated suite now also executes exact-reference lookup, presentation
+action/error guidance, controller message/phase/token/busy guards and the
+generated webview script in a dependency-free DOM harness. Controller fixtures
+use isolated keys, actual local storage and the parent DataService; simulated
+events are not human consent or real VS Code host evidence. Browser previews
+are inert presentation checks, never approval certification.
 
 **Not yet certified:** installed VSIX acceptance; local UI versus SSH/container
 workspace-host placement; cross-extension command routing; SecretStorage and

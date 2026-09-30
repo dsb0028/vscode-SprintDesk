@@ -32,7 +32,7 @@ function record(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-export function parseTaskSource(content: string, taskId: string): Record<string, unknown> {
+function taskSources(content: string): Record<string, unknown>[] {
   // JSON schema keeps timestamps as strings and rejects executable/custom YAML tags.
   const data = record(yaml.load(content, { schema: yaml.JSON_SCHEMA }));
   if (!Array.isArray(data.tasks)) { throw new Error('Invalid tasks.yml source.'); }
@@ -41,10 +41,37 @@ export function parseTaskSource(content: string, taskId: string): Record<string,
     || new Set(tasks.map(task => task.id)).size !== tasks.length) {
     throw new Error('Ambiguous/duplicate task identity in source.');
   }
-  const task = tasks.find(entry => entry.id === taskId);
+  return tasks;
+}
+
+export function parseTaskSource(content: string, taskId: string): Record<string, unknown> {
+  const task = taskSources(content).find(entry => entry.id === taskId);
   if (!task) { throw new Error('Task deleted/missing from actual YAML source.'); }
   canonical(task);
   return task;
+}
+
+export async function resolveTaskReference(files: SourceFiles, reference: string): Promise<string> {
+  if (!/^[a-zA-Z0-9._-]{1,128}$/.test(reference)
+    || ['__proto__', 'constructor', 'prototype'].includes(reference)) {
+    throw new Error('Enter an exact task code or canonical ID, not a title or path.');
+  }
+  const relative = '.SprintDesk/data/tasks.yml';
+  const bytes = await files.read(relative);
+  const tasks = taskSources(text(bytes, 10_000_000));
+  const matches = tasks.filter(task => task.id === reference || task.code === reference);
+  if (!matches.length) { throw new Error('Task code or ID not found in the pinned workspace source.'); }
+  if (matches.length !== 1) { throw new Error('Ambiguous task code/ID. Use an unambiguous canonical ID.'); }
+  const taskId = matches[0].id;
+  if (typeof taskId !== 'string' || !/^[a-zA-Z0-9._-]{1,128}$/.test(taskId)
+    || ['__proto__', 'constructor', 'prototype'].includes(taskId)) {
+    throw new Error('Invalid canonical task identity in actual source.');
+  }
+  canonical(matches[0]);
+  if (!Buffer.from(await files.read(relative)).equals(Buffer.from(bytes))) {
+    throw new Error('Task source changed during lookup. Load the task again before reviewing.');
+  }
+  return taskId;
 }
 
 export function markdownPath(task: Record<string, unknown>, workspacePath: string): string {

@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "outDir": "out" },
-  "include": ["src/state.ts", "src/source.ts", "src/storage.ts", "tests/**/*.ts", "../src/review/protocol.ts"]
+  "include": ["src/**/*.ts", "tests/**/*.ts", "../src/review/protocol.ts"]
 }

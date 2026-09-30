@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
-import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { digest, Enrollment, signReceipt, SnapshotResponse } from '../../src/review/protocol';
 import {
@@ -8,8 +7,9 @@ import {
   reconcile, recordIntent, resumeDraft, TaskLedger, validateSnapshot
 } from './state';
 import { html } from './webview';
-import { readSource, SourceReadback } from './source';
-import { LocalLease, RootStore } from './storage';
+import { readSource, resolveTaskReference, SourceReadback } from './source';
+import { assertStorageLocation, LocalLease, RootStore, verifyLocalStorageMapping } from './storage';
+import { ActionContext, availableActions, errorHelp, ReviewPhase } from './presentation';
 
 type Message = { action: string; token: string; taskId?: string; reviewerId?: string;
   reviewerName?: string; placement?: string };
@@ -21,8 +21,11 @@ class ReviewPanel {
   private taskId = '';
   private paths: string[] = [];
   private token = '';
-  private phase = 'load';
+  private phase: ReviewPhase = 'load';
   private busy = false;
+  private progress = '';
+  private reconciled = false;
+  private unsavedIntent = false;
   private disposed = false;
   private readonly storageKey: string;
   private readonly subscription: vscode.Disposable;
@@ -81,12 +84,13 @@ class ReviewPanel {
   }
 
   private async snapshot(): Promise<SnapshotResponse> {
+    this.showProgress('Reading the pinned workspace and current task source...');
     await this.lease.assertHeld();
     if (!this.root || !this.taskId) { throw new Error('Select a task.'); }
     let result: SnapshotResponse;
     try {
       result = await vscode.commands.executeCommand<SnapshotResponse>('sprintdesk.reviewSnapshot',
-        this.workspace.uri.fsPath, this.taskId, this.paths);
+        this.workspace.uri.toString(), this.taskId, this.paths);
       validateSnapshot(result!, this.root.enrollment.projectId, this.taskId, this.paths);
     } catch (error) {
       const task = this.root.tasks[this.taskId];
@@ -114,6 +118,7 @@ class ReviewPanel {
   }
 
   private async load(): Promise<void> {
+    this.reconciled = false;
     this.response = await this.snapshot();
     let task: TaskLedger;
     try {
@@ -124,6 +129,7 @@ class ReviewPanel {
     await this.persist();
     reconcile(this.root!, task, this.response);
     await this.persist();
+    this.reconciled = true;
     if (this.response.status === 'done') { this.phase = 'done'; return; }
     if (this.response.status !== 'under-review') { throw new Error('Task must be under-review.'); }
     const latest = task.operations[task.operations.length - 1];
@@ -140,6 +146,34 @@ class ReviewPanel {
     this.phase = draft.decisions.length === this.response.snapshot.criteria.length
       && !draft.decisions.includes('needs-evidence') ? 'summary' : 'criterion';
     await this.persist();
+  }
+
+  private async selectTask(reference: string): Promise<void> {
+    this.showProgress('Resolving the exact task code or ID from the pinned workspace...');
+    let id: string;
+    try {
+      id = await resolveTaskReference({
+        read: async relative => vscode.workspace.fs.readFile(vscode.Uri.joinPath(this.workspace.uri, relative))
+      }, reference);
+    } catch (error) {
+      const remembered = (this.root && Object.prototype.hasOwnProperty.call(this.root.tasks, reference)
+        ? this.root.tasks[reference] : undefined)
+        ?? (reference === this.source?.taskSource.code ? this.root?.tasks[this.taskId] : undefined);
+      if (remembered) {
+        remembered.blocked = true;
+        if (remembered.draft) { remembered.draft.invalidated = true; }
+        await this.persist();
+      }
+      throw error;
+    }
+    if (id !== this.taskId) {
+      this.paths = this.root?.tasks[id]?.draft?.evidencePaths
+        ?? this.root?.tasks[id]?.operations.slice(-1)[0]?.receipt.payload.evidencePaths ?? [];
+      this.response = undefined;
+      this.source = undefined;
+    }
+    this.taskId = id;
+    await this.load();
   }
 
   private async enroll(message: Message): Promise<void> {
@@ -178,7 +212,7 @@ class ReviewPanel {
     this.placement();
     if (!this.root || this.root.revoked) { throw new Error('No active local authority.'); }
     await vscode.commands.executeCommand('sprintdesk.reviewEnroll',
-      this.workspace.uri.fsPath, this.root.enrollment);
+      this.workspace.uri.toString(), this.root.enrollment);
   }
 
   // This method is private and invoked exclusively from the webview's final-confirm events.
@@ -206,17 +240,23 @@ class ReviewPanel {
     if (this.disposed) { throw new Error('Review UI closed.'); }
     await this.lease.assertHeld();
     if (this.disposed) { throw new Error('Review UI closed.'); }
+    this.showProgress('Signing this confirmed operation locally...');
     const receipt = signReceipt(payload(this.root, task, current.snapshot, intent, this.paths), secret);
     recordIntent(this.root, task, receipt, current.workStatus);
+    this.unsavedIntent = true;
+    this.showProgress('Saving the signed intent to the durable local ledger...');
     await this.persist();
+    this.unsavedIntent = false;
     // Delivery results are never authority. Only readback against the durable local intent can accept.
     try {
       await this.lease.assertHeld();
-      await vscode.commands.executeCommand('sprintdesk.reviewCommit', this.workspace.uri.fsPath, receipt);
+      this.showProgress('Submitting the saved signed operation...');
+      await vscode.commands.executeCommand('sprintdesk.reviewCommit', this.workspace.uri.toString(), receipt);
     } catch {
       this.phase = 'uncertain';
     }
     try {
+      this.showProgress('Checking persisted results against independent local authority...');
       await this.load();
     } catch (error) {
       this.phase = 'uncertain';
@@ -234,23 +274,15 @@ class ReviewPanel {
     const keys = Object.keys(message);
     if (keys.some(k => !['action', 'token', 'taskId', 'reviewerId', 'reviewerName', 'placement'].includes(k))
       || typeof message.action !== 'string' || message.token !== this.token) { return; }
-    const allowed: Record<string, string[]> = {
-      enroll: ['enroll'], load: ['load', 'revoke', 'mirror'],
-      criterion: ['met', 'needs work', 'needs-evidence', 'evidence', 'discard', 'revoke'],
-      summary: ['confirm-review', 'discard', 'revoke'],
-      complete: ['complete-summary', 'new-review', 'load', 'revoke'],
-      completionSummary: ['confirm-complete', 'cancel', 'revoke'],
-      reviewed: ['new-review', 'load', 'revoke'], done: ['load', 'revoke'],
-      uncertain: ['reconcile', 'retry', 'unblock'],
-      error: ['load', 'discard', 'reset', 'unblock', 'revoke', 'mirror', 'reconcile', 'retry'],
-      revoked: ['recover', 'reconcile', 'retry', 'unblock']
-    };
-    if (!allowed[this.phase]?.includes(message.action)) { return; }
+    if (!availableActions(this.phase, this.actionContext()).includes(message.action)) { return; }
     const enrollmentEvent = message.action === 'enroll';
     if (keys.some(k => !['action', 'token', ...(enrollmentEvent
       ? ['reviewerId', 'reviewerName', 'placement'] : message.action === 'load' ? ['taskId'] : [])].includes(k))) { return; }
     this.busy = true;
     this.token = '';
+    this.reconciled = false;
+    let diagnostic = '';
+    this.showProgress('Processing the local action...');
     try {
       this.placement();
       switch (message.action) {
@@ -260,18 +292,15 @@ class ReviewPanel {
           this.phase = 'enroll'; break;
         case 'mirror': await this.mirror(); this.phase = 'load'; break;
         case 'load':
-          if (typeof message.taskId !== 'string' || !/^[a-zA-Z0-9._-]{1,128}$/.test(message.taskId)) {
-            throw new Error('Enter an exact task ID.');
+          if (typeof message.taskId !== 'string') {
+            throw new Error('Enter an exact task code or canonical ID.');
           }
-          if (this.taskId !== message.taskId) {
-            this.paths = this.root?.tasks[message.taskId]?.draft?.evidencePaths
-              ?? this.root?.tasks[message.taskId]?.operations.slice(-1)[0]?.receipt.payload.evidencePaths ?? [];
-          }
-          this.taskId = message.taskId; await this.load(); break;
+          await this.selectTask(message.taskId); break;
         case 'met': case 'needs work': case 'needs-evidence': {
           const draft = this.task().draft!;
           const waiting = draft.decisions.indexOf('needs-evidence');
           decide(draft, this.response!.snapshot, waiting < 0 ? draft.decisions.length : waiting, message.action);
+          this.showProgress('Saving your individual decision in the local draft...');
           await this.persist();
           this.phase = draft.decisions.length === this.response!.snapshot.criteria.length
             && !draft.decisions.includes('needs-evidence') ? 'summary' : 'criterion';
@@ -281,7 +310,10 @@ class ReviewPanel {
         case 'discard':
           if (this.root && pending(this.root)) { throw new Error('Resolve uncertain intent first.'); }
           this.task().draft = undefined; await this.persist(); await this.load(); break;
-        case 'complete-summary': this.phase = 'completionSummary'; break;
+        case 'complete-summary':
+          await this.load();
+          if (this.phase !== 'complete') { throw new Error('Current review is not verified all-met.'); }
+          this.phase = 'completionSummary'; break;
         case 'new-review': {
           if (pending(this.root!)) { throw new Error('Resolve prior operation first.'); }
           const current = await this.snapshot();
@@ -292,7 +324,7 @@ class ReviewPanel {
           resumeDraft(this.task(), current.snapshot, this.paths);
           await this.persist(); this.phase = 'criterion'; break;
         }
-        case 'cancel': this.phase = 'complete'; break;
+        case 'cancel': await this.load(); break;
         case 'confirm-review': await this.commit('review'); break;
         case 'confirm-complete': await this.commit('complete'); break;
         case 'reconcile': await this.load(); break;
@@ -300,7 +332,11 @@ class ReviewPanel {
           const op = this.task().operations.slice(-1)[0];
           if (!op || op.state !== 'pending') { throw new Error('No pending durable receipt.'); }
           await this.lease.assertHeld();
-          await vscode.commands.executeCommand('sprintdesk.reviewCommit', this.workspace.uri.fsPath, op.receipt);
+          this.showProgress('Ensuring the identical signed intent is saved durably before retry...');
+          await this.persist();
+          this.unsavedIntent = false;
+          this.showProgress('Retrying the identical saved receipt, without a new signature...');
+          await vscode.commands.executeCommand('sprintdesk.reviewCommit', this.workspace.uri.toString(), op.receipt);
           await this.load(); break;
         }
         case 'reset': {
@@ -340,11 +376,14 @@ class ReviewPanel {
           }
           break;
       }
-      this.render();
     } catch (error) {
       if (this.phase !== 'uncertain') { this.phase = this.root?.revoked ? 'revoked' : this.root ? 'error' : 'enroll'; }
-      this.render(String(error));
-    } finally { this.busy = false; }
+      diagnostic = String(error);
+    } finally {
+      this.busy = false;
+      this.progress = '';
+      this.render(diagnostic);
+    }
   }
 
   private async selectEvidence(): Promise<void> {
@@ -369,15 +408,44 @@ class ReviewPanel {
     await this.load();
   }
 
+  private actionContext(): ActionContext {
+    const task = this.root?.tasks[this.taskId];
+    return {
+      authority: !!this.root, task: !!task, draft: !!task?.draft, blocked: !!task?.blocked,
+      pending: !!this.root && pending(this.root),
+      retry: task?.operations.slice(-1)[0]?.state === 'pending', revoked: !!this.root?.revoked
+    };
+  }
+
+  private showProgress(message: string): void {
+    this.progress = message;
+    this.render();
+  }
+
   private render(error = ''): void {
     if (this.disposed) { return; }
-    this.token = randomUUID();
+    if (!this.busy) { this.token = randomUUID(); }
     if (this.root?.revoked && !['enroll', 'uncertain'].includes(this.phase)) { this.phase = 'revoked'; }
     const draft = this.root?.tasks[this.taskId]?.draft;
     const waiting = draft?.decisions.indexOf('needs-evidence') ?? -1;
     const index = waiting < 0 ? draft?.decisions.length ?? 0 : waiting;
+    const task = this.root?.tasks[this.taskId];
+    const latest = task?.operations.slice(-1)[0];
+    const context = this.actionContext();
     void this.panel.webview.postMessage({
       token: this.token, phase: this.phase, error, taskId: this.taskId,
+      busy: this.busy, progress: this.progress, taskStatus: this.response?.status,
+      verification: !this.busy && this.reconciled && latest?.state === 'accepted'
+        && ['complete', 'reviewed', 'completionSummary', 'done'].includes(this.phase)
+        ? 'verified' : draft && !draft.invalidated && !this.busy && !error ? 'draft' : 'unverified',
+      draftSaved: !!draft && !draft.invalidated && !this.busy && !error,
+      pendingIntent: latest?.state === 'pending' ? latest.receipt.payload.intent : undefined,
+      allowedActions: this.busy ? [] : availableActions(this.phase, context),
+      errorHelp: error ? this.unsavedIntent
+        ? 'The signed intent is not confirmed saved durably. It has not been delivered. '
+          + 'Resolve the local storage error, then retry the same intent; retry saves it durably before delivery. '
+          + 'Do not start another signature or replace your key.'
+        : errorHelp(error, context.pending, context.blocked) : undefined,
       identity: this.root?.enrollment, workspace: this.workspace.uri.toString(),
       host: `extensionUri=${this.context.extensionUri.scheme}; extensionKind=${vscode.extensions.getExtension(this.context.extension.id)?.extensionKind}; appHost=${vscode.env.appHost}; remoteName=${vscode.env.remoteName ?? '(none)'}`,
       snapshot: this.response?.snapshot, decisions: draft?.decisions, index,
@@ -410,10 +478,14 @@ export function activate(context: vscode.ExtensionContext): void {
         { title: 'Pin the exact workspace URI for local review' });
       const workspace = choice && ('folder' in choice ? choice.folder : choice);
       if (!workspace) { return; }
-      if (context.globalStorageUri.scheme !== 'file') { throw new Error('Local filesystem storage required.'); }
-      await fs.mkdir(context.globalStorageUri.fsPath, { recursive: true, mode: 0o700 });
+      const storageUri = context.globalStorageUri;
+      const storageDirectory = storageUri.with({ scheme: 'file' }).fsPath;
+      assertStorageLocation(storageUri.scheme, storageUri.authority, storageUri.query,
+        storageUri.fragment, storageDirectory);
+      await verifyLocalStorageMapping(storageDirectory, async name =>
+        vscode.workspace.fs.readFile(vscode.Uri.joinPath(storageUri, name)));
       const authority = digest(workspace.uri.toString());
-      const lockPath = path.join(context.globalStorageUri.fsPath, `authority-${authority}.lock`);
+      const lockPath = path.join(storageDirectory, `authority-${authority}.lock`);
       try {
         lease = await LocalLease.acquire(lockPath);
       } catch (error) {
@@ -423,7 +495,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (answer !== 'Recover stale local lease') { return; }
         lease = await LocalLease.recover(lockPath, true);
       }
-      const store = new RootStore(path.join(context.globalStorageUri.fsPath, `authority-${authority}.json`), lease);
+      const store = new RootStore(path.join(storageDirectory, `authority-${authority}.json`), lease);
       const stored = await store.read();
       const projectIndex = context.globalState.get<string>(`authority-index:${workspace.uri.toString()}`);
       if (!stored && projectIndex) {

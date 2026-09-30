@@ -8,7 +8,10 @@ Remote public-key registration is a verification mirror, not local authority.
 ## Frozen integration contract
 
 The local UI extension uses VS Code's cross-extension commands, not a forwarded
-HTTP port. All commands take a workspace filesystem path as the first argument:
+HTTP port. All commands take the pinned workspace URI as the first argument.
+The remote host resolves its decoded URI path against exactly one open folder
+and uses that folder's native filesystem path; it never uses the client-platform
+`fsPath`. Exact native paths remain accepted for earlier remote callers:
 
 - `sprintdesk.reviewSnapshot(workspace, taskId, evidencePaths?)` returns
   `{ snapshot, status, reviewReceipt?, completionReceipt? }`.
@@ -21,6 +24,16 @@ reviewer identity and public key in local storage. The companion refuses a
 remote-host extension URI. There is no command to sign supplied decisions.
 Externally invoked commands may only open the local UI; signing requires
 per-criterion UI events and a separate final UI confirmation.
+
+The companion can resolve an exact task code or canonical ID from the pinned
+workspace's bounded actual YAML source before loading. Missing or ambiguous
+matches are refused; only canonical IDs index local drafts and receipts.
+User-friendly phase headings, summaries and progress do not change this wire
+contract. Task status and approval verification are displayed separately.
+Review submission leaves the task Under Review; only a distinct completion
+confirmation followed by independent reconciliation permits a verified Done
+display. Technical source and ledger details remain inspectable, and drift/
+tamper warnings are never hidden by presentation disclosures.
 
 Snapshots bind all task metadata except generated approval fields, lifecycle
 status/work status and update timestamps. Receipts separately bind the expected

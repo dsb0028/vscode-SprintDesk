@@ -4,13 +4,33 @@ import * as path from 'node:path';
 import { randomUUID, generateKeyPairSync } from 'node:crypto';
 import { keyId } from '../../src/review/protocol';
 import { LocalRoot } from '../src/state';
-import { LocalLease, RootStore } from '../src/storage';
+import { assertStorageLocation, LocalLease, RootStore, verifyLocalStorageMapping } from '../src/storage';
 
 async function main(): Promise<void> {
   const directory = path.join(process.cwd(), `.storage-test-${randomUUID()}`);
   await fs.mkdir(directory);
   let lease: LocalLease | undefined;
   try {
+    for (const scheme of ['file', 'vscode-userdata']) {
+      assertStorageLocation(scheme, '', '', '', directory);
+    }
+    for (const scheme of ['vscode-remote', 'https', 'unknown']) {
+      assert.throws(() => assertStorageLocation(scheme, '', '', '', directory), /unsupported/);
+    }
+    assert.throws(() => assertStorageLocation('vscode-userdata', 'ssh-remote', '', '', directory), /ambiguous/);
+    assert.throws(() => assertStorageLocation('file', '', 'query', '', directory), /ambiguous/);
+    assert.throws(() => assertStorageLocation('file', '', '', 'fragment', directory), /ambiguous/);
+    assert.throws(() => assertStorageLocation('file', '', '', '', 'relative'), /ambiguous/);
+    console.log('PASS native file and desktop userdata locations accepted; remote/ambiguous URIs refused');
+    await verifyLocalStorageMapping(directory, async name => fs.readFile(path.join(directory, name)));
+    assert.deepEqual(await fs.readdir(directory), []);
+    console.log('PASS userdata provider must read the same local filesystem challenge before enrollment');
+    await assert.rejects(verifyLocalStorageMapping(directory, async () => Buffer.from('wrong host')), /does not match/);
+    await assert.rejects(verifyLocalStorageMapping(directory, async () => {
+      throw new Error('Provider unavailable');
+    }), /Provider unavailable/);
+    assert.deepEqual(await fs.readdir(directory), []);
+    console.log('PASS wrong-host and unavailable storage providers fail closed and clean probe files');
     const file = path.join(directory, 'authority.lock');
     const acquisition = await Promise.allSettled([LocalLease.acquire(file), LocalLease.acquire(file)]);
     const winners = acquisition.filter(result => result.status === 'fulfilled');
@@ -53,6 +73,6 @@ async function main(): Promise<void> {
     if (lease) await lease.release();
     await fs.rm(directory, { recursive: true, force: true });
   }
-  console.log('4 local filesystem lease/durability tests passed; no installed UI evidence claimed.');
+  console.log('7 local storage/mapping/lease/durability tests passed; no installed UI evidence claimed.');
 }
 void main().catch(error => { console.error(error); process.exitCode = 1; });

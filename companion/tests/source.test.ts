@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import yaml from 'js-yaml';
 import { reviewedMarkdown, SnapshotResponse } from '../../src/review/protocol';
-import { markdownPath, parseTaskSource, readSource, sourceCriteria } from '../src/source';
+import { markdownPath, parseTaskSource, readSource, resolveTaskReference, sourceCriteria } from '../src/source';
 
 function fixture() {
   const task = {
@@ -37,6 +37,30 @@ async function main(): Promise<void> {
   async function test(name: string, run: () => Promise<void>): Promise<void> {
     await run(); passed++; console.log(`PASS ${name}`);
   }
+  await test('exact task code and ID resolve to the same canonical identity, never a title guess', async () => {
+    const content = yaml.dump({ tasks: [{ id: 'canonical-id', code: 'SPD-149', title: 'Friendly task' }] });
+    const files = { read: async () => Buffer.from(content) };
+    assert.equal(await resolveTaskReference(files, 'SPD-149'), 'canonical-id');
+    assert.equal(await resolveTaskReference(files, 'canonical-id'), 'canonical-id');
+    await assert.rejects(resolveTaskReference(files, 'Friendly task'));
+    await assert.rejects(resolveTaskReference(files, 'SPD-999'), /missing|not found/i);
+  });
+  await test('duplicate codes, IDs, executable YAML, oversized and changing lookup source fail closed', async () => {
+    for (const content of [
+      yaml.dump({ tasks: [{ id: 'one', code: 'SPD-1' }, { id: 'two', code: 'SPD-1' }] }),
+      yaml.dump({ tasks: [{ id: 'one', code: 'SPD-1' }, { id: 'one', code: 'SPD-2' }] }),
+      yaml.dump({ tasks: [{ id: 'SPD-1', code: 'SPD-2' }, { id: 'two', code: 'SPD-1' }] }),
+      'tasks: !!js/function "function(){}"', 'tasks: []\ntasks: []',
+      '\ufefftasks: []', '#'.repeat(10_000_001)
+    ]) await assert.rejects(resolveTaskReference({ read: async () => Buffer.from(content) }, 'SPD-1'));
+    let reads = 0;
+    await assert.rejects(resolveTaskReference({ read: async () => Buffer.from(yaml.dump({
+      tasks: [{ id: ++reads === 1 ? 'one' : 'two', code: 'SPD-1' }]
+    })) }, 'SPD-1'), /changed/i);
+    for (const invalid of ['__proto__', 'constructor', 'prototype', '../SPD-1', 'SPD-1\n']) {
+      await assert.rejects(resolveTaskReference({ read: async () => Buffer.from('tasks: []') }, invalid));
+    }
+  });
   await test('independent workspace source reproduces snapshot without trusting remote enrollment', async () => {
     const f = fixture();
     const source = await f.run();

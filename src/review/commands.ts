@@ -1,12 +1,13 @@
 import * as vscode from 'vscode';
 import { getDataService } from '../data/DataService';
 import { Enrollment, SignedReceipt } from './protocol';
+import { resolveReviewWorkspace } from './workspace';
 
 function service(workspace: string) {
-  if (!vscode.workspace.workspaceFolders?.some(folder => folder.uri.fsPath === workspace)) {
-    throw new Error('Review workspace is not an open workspace folder');
-  }
-  return getDataService(workspace);
+  const folders = vscode.workspace.workspaceFolders?.map(folder => ({
+    path: folder.uri.path, fsPath: folder.uri.fsPath,
+  })) ?? [];
+  return getDataService(resolveReviewWorkspace(workspace, folders));
 }
 
 export function registerReviewCommands(context: vscode.ExtensionContext): void {

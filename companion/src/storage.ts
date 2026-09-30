@@ -3,6 +3,36 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { LocalRoot } from './state';
 
+export function assertStorageLocation(
+  scheme: string, authority: string, query: string, fragment: string, directory: string,
+): void {
+  if (!['file', 'vscode-userdata'].includes(scheme) || authority || query || fragment
+    || !path.isAbsolute(directory)) {
+    throw new Error('Local filesystem storage required: unsupported or ambiguous storage URI.');
+  }
+}
+
+export async function verifyLocalStorageMapping(
+  directory: string, readProvider: (name: string) => Promise<Uint8Array>,
+): Promise<void> {
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  const name = `.storage-probe-${randomUUID()}`;
+  const file = path.join(directory, name);
+  const challenge = Buffer.from(randomUUID());
+  const handle = await fs.open(file, 'wx', 0o600);
+  try {
+    await handle.writeFile(challenge);
+    await handle.sync();
+    const observed = await readProvider(name);
+    if (!challenge.equals(Buffer.from(observed))) {
+      throw new Error('VS Code storage does not match this host filesystem. Enrollment refused.');
+    }
+  } finally {
+    await handle.close();
+    await fs.unlink(file);
+  }
+}
+
 interface Owner { version: 1; token: string; pid: number; createdAt: string; }
 function errorCode(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException)?.code;

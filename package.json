@@ -3,7 +3,7 @@
   "publisher": "khmamed",
   "displayName": "vscode-SprintDesk",
   "description": "A Visual Studio Code extension for managing sprints and tasks in an agile development workflow",
-  "version": "0.6.0",
+  "version": "0.6.2",
   "repository": {
     "url": "https://github.com/khmmamed/vscode-SprintDesk.git",
     "type": "git"
@@ -36,7 +36,7 @@
     "test:backlog-priorities": "npm run compile-tests && node out/providers/backlogPriorities.test.js",
     "test:mcp": "npm run compile-tests && node out/mcp/core.test.js",
     "test:reviewers": "npm run compile-tests && node out/data/stores/ReviewerStore.test.js",
-    "test:review-authorization": "npm run compile-tests && node out/review/authorization.test.js",
+    "test:review-authorization": "npm run compile-tests && node out/review/authorization.test.js && node out/review/workspace.test.js",
     "watch-tests": "tsc -p . -w --outDir out --noEmit false",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
