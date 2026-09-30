@@ -34,7 +34,9 @@ function projected(snapshot: ReviewSnapshot, receipt: SignedReceipt,
   reviewReceipt = receipt): SnapshotResponse {
   const p = receipt.payload, r = reviewReceipt.payload;
   return {
-    snapshot, status: p.intent === 'review' ? 'under-review' : 'done',
+    snapshot,
+    status: p.intent === 'complete' ? 'done'
+      : p.criteria.some(entry => entry.result === 'needs work') ? 'needs-modification' : 'under-review',
     workStatus: p.intent === 'review' ? 'review' : 'done',
     reviewReceipt,
     ...(p.intent === 'complete' ? { completionReceipt: receipt,
@@ -162,6 +164,7 @@ test('needs-work review cannot complete; drift, revocation and wrong sequence ca
   decide(draft, snapshot, 0, 'met'); decide(draft, snapshot, 1, 'needs work');
   const review = signReceipt(payload(root, task, snapshot, 'review', ['results.txt']), privateKey);
   recordIntent(root, task, review, 'review'); reconcile(root, task, projected(snapshot, review));
+  assert.equal(projected(snapshot, review).status, 'needs-modification');
   assert.throws(() => payload(root, task, snapshot, 'complete', ['results.txt']), /all-met/);
   assert.throws(() => payload(root, task, { ...snapshot, markdown: 'changed' }, 'review', ['results.txt']), /Every/);
   assert.throws(() => recordIntent(root, task, signReceipt({ ...review.payload, sequence: 1 }, privateKey)), /sequence/);

@@ -130,9 +130,16 @@ class ReviewPanel {
     reconcile(this.root!, task, this.response);
     await this.persist();
     this.reconciled = true;
-    if (this.response.status === 'done') { this.phase = 'done'; return; }
-    if (this.response.status !== 'under-review') { throw new Error('Task must be under-review.'); }
     const latest = task.operations[task.operations.length - 1];
+    if (this.response.status === 'done') { this.phase = 'done'; return; }
+    if (this.response.status === 'needs-modification'
+      && latest?.state === 'accepted'
+      && latest.receipt.payload.intent === 'review'
+      && latest.receipt.payload.criteria.some(criterion => criterion.result === 'needs work')) {
+      this.phase = 'reviewed';
+      return;
+    }
+    if (this.response.status !== 'under-review') { throw new Error('Task must be under-review.'); }
     if (latest?.state === 'accepted' && latest.receipt.payload.intent === 'review') {
       this.phase = latest.receipt.payload.criteria.every(c => c.result === 'met') ? 'complete' : 'reviewed';
       return;

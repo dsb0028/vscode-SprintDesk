@@ -82,6 +82,29 @@ crash, an operator must establish the writer has stopped, inspect readback and
 explicitly recover the exact `tasks.yml.lock`. Outside filesystem writers
 remain outside that guarantee.
 
+## Needs-work review outcome
+
+A fully decided, current signed review with one or more `needs work` criteria
+changes a task from `under-review` to `needs-modification` (**Needs
+Modification**) as part of the same locked task-YAML write that persists the
+review projection, signed receipt, and approval-history record. It leaves the
+task's backlog field, work status, completion receipt, and human verification
+unchanged. Under-review tasks are already detached from active backlog work, so
+the transition does not assign or reassign a backlog.
+
+All-met reviews remain `under-review` and may later receive their separate
+signed completion receipt. A needs-work review cannot complete the task. The
+rework status is not a generic approval or chat-controlled transition: callers
+cannot assign it through ordinary task updates.
+
+The commit verifies its persisted readback while holding the task-store lock.
+If persistence or readback verification fails, it restores the prior task
+document before reporting the failure. An uncertain local delivery must be
+reconciled against the same locally saved receipt; do not create a new
+signature. Exact re-delivery is idempotent only after that committed projection
+matches the receipt. A new finalization is rejected once the task is no longer
+`under-review`.
+
 ## Limits and installation gates
 
 Local computer, installed companion, SecretStorage and UI are trusted.

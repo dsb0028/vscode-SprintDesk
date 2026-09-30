@@ -79,6 +79,7 @@ export class TaskTreeItem extends vscode.TreeItem {
       case 'waiting': return '⏳';
       case 'in-progress': return '🔄';
       case 'under-review': return '🔎';
+      case 'needs-modification': return '🛠️';
       case 'done': return '✅';
       case 'blocked': return '⛔';
       case 'cancelled': return '❌';

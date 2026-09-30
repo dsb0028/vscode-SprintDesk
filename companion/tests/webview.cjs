@@ -294,7 +294,7 @@ test('enrollment schema and graceful no-snapshot rendering', () => {
 
 test('reviewed, recovery, reset, discard, cancellation and fresh review keep existing action schemas', () => {
   const cases = [
-    ['reviewed', 'new-review'], ['revoked', 'recover'], ['revoked', 'unblock'],
+    ['revoked', 'recover'], ['revoked', 'unblock'],
     ['uncertain', 'retry'], ['error', 'reset'], ['error', 'discard'], ['error', 'mirror'],
     ['load', 'revoke'], ['summary', 'discard'], ['completionSummary', 'cancel']
   ];
@@ -306,10 +306,11 @@ test('reviewed, recovery, reset, discard, cancellation and fresh review keep exi
   }
   const ui = harness();
   ui.render(state('reviewed', { verification: 'verified' }));
-  assert.match(ui.text(), /Review submitted — further work required/);
+  assert.match(ui.text(), /Review submitted — needs modification/);
   assert.match(ui.text(), /needs-work review has been submitted and its receipt verified/);
-  assert.match(ui.text(), /criteria are not all met/);
+  assert.match(ui.text(), /task is now Needs Modification/);
   assert.doesNotMatch(ui.text(), /Review accepted|ready to complete/);
+  assert.equal(ui.action('new-review'), undefined);
   assert.equal(ui.byId('stepper').children[3].getAttribute('aria-current'), 'step');
   assert.equal(ui.action('confirm-complete'), undefined);
 });

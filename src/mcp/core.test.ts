@@ -176,6 +176,7 @@ Keep this note.
     assert.ok(toolNames.includes('sprintdesk_listHumanReviewers'));
     const updateTaskTool = toolsResponse.result.tools.find((tool: { name: string }) => tool.name === 'sprintdesk_updateTask');
     assert.ok(updateTaskTool.inputSchema.properties.status.enum.includes('under-review'));
+    assert.ok(!updateTaskTool.inputSchema.properties.status.enum.includes('needs-modification'));
     assert.equal(updateTaskTool.inputSchema.properties.humanVerification, undefined);
     assert.equal(updateTaskTool.inputSchema.properties.review, undefined);
     assert.ok(!updateTaskTool.inputSchema.properties.status.enum.includes('done'));
@@ -405,7 +406,7 @@ Keep this note.
       operationId: randomUUID(), sequence: 1, timestamp: new Date().toISOString(),
       criteria: [
         { criterion: 'Verify the first criterion.', result: 'met' },
-        { criterion: 'Verify the second criterion across a wrapped line.', result: 'needs work' },
+        { criterion: 'Verify the second criterion across a wrapped line.', result: 'met' },
       ],
       evidencePaths: [],
     };
@@ -423,7 +424,7 @@ Keep this note.
     assert.equal(reviewedResponse.result.isError, undefined);
     const reviewedTask = JSON.parse(reviewedResponse.result.content[0].text);
     assert.equal(reviewedTask.status, 'under-review');
-    assert.equal(reviewedTask.review.summary, 'further work required');
+    assert.equal(reviewedTask.review.summary, 'accepted');
     assert.equal(reviewedTask.review.reviewerId, 'reviewer-2');
     assert.match(reviewedTask.review.reviewedAt, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
     for (const entry of reviewedTask.review.criteria) {
@@ -435,31 +436,16 @@ Keep this note.
       params: { name: 'sprintdesk_getTask', arguments: { taskId: 'SPD-1' } },
     });
     assert.deepEqual(JSON.parse(reviewReadback.result.content[0].text).review, reviewedTask.review);
-    assert.match(readFileSync(taskOnePath, 'utf8'), /Summary: further work required/);
-    assert.match(readFileSync(taskOnePath, 'utf8'), /Result: needs work/);
+    assert.match(readFileSync(taskOnePath, 'utf8'), /Summary: accepted/);
+    assert.match(readFileSync(taskOnePath, 'utf8'), /Result: met/);
     assertReviewMarkdown(reviewedTask, readFileSync(taskOnePath, 'utf8'));
     assertReviewMarkdown(
       JSON.parse(reviewReadback.result.content[0].text),
       readFileSync(taskOnePath, 'utf8'),
     );
 
-    const acceptedPayload: ReceiptPayload = {
-      ...reviewPayload, operationId: randomUUID(), sequence: 2,
-      criteria: reviewPayload.criteria.map(entry => ({ ...entry, result: 'met' })),
-    };
-    const acceptedResponse = await handleRequest({
-      jsonrpc: '2.0',
-      id: 45,
-      method: 'tools/call',
-      params: {
-        name: 'sprintdesk_commitHumanReview',
-        arguments: {
-          receipt: signReceipt(acceptedPayload, testPrivateKey),
-        },
-      },
-    });
-    assert.equal(JSON.parse(acceptedResponse.result.content[0].text).review.summary, 'accepted');
-    assert.equal(JSON.parse(acceptedResponse.result.content[0].text).status, 'under-review');
+    const acceptedPayload = reviewPayload;
+    const acceptedResponse = reviewedResponse;
     const afterAccepted = readFileSync(taskOnePath, 'utf8');
     assert.equal(afterAccepted.match(/### Review Handoff/g)?.length, 1);
     assertReviewMarkdown(JSON.parse(acceptedResponse.result.content[0].text), afterAccepted);
@@ -532,7 +518,7 @@ Keep this note.
         name: 'sprintdesk_commitHumanReview',
         arguments: {
           receipt: signReceipt({
-            ...acceptedPayload, intent: 'complete', operationId: randomUUID(), sequence: 3,
+            ...acceptedPayload, intent: 'complete', operationId: randomUUID(), sequence: 2,
             reviewOperationId: acceptedPayload.operationId,
           }, testPrivateKey),
         },
@@ -555,9 +541,9 @@ Keep this note.
     const approvalAudit = JSON.parse(approvalAuditResponse.result.content[0].text) as {
       id: string; action: string;
     }[];
-    assert.equal(approvalAudit.filter(entry => entry.action === 'review').length, 2);
+    assert.equal(approvalAudit.filter(entry => entry.action === 'review').length, 1);
     assert.equal(approvalAudit.filter(entry => entry.action === 'approve').length, 1);
-    assert.equal(new Set(approvalAudit.map(entry => entry.id)).size, 3);
+    assert.equal(new Set(approvalAudit.map(entry => entry.id)).size, 2);
 
     const beforeRefresh = readFileSync(tasksPath, 'utf8');
     let refreshCalls = 0;
@@ -683,6 +669,64 @@ Keep this note.
     });
     assert.match(repeatIncompleteAssignmentResponse.result.content[0].text, /added to sprint/);
     assert.equal(readFileSync(taskTwoPath, 'utf8'), afterIncompleteAssignment);
+
+    const submitSecondTaskResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 48,
+      method: 'tools/call',
+      params: { name: 'sprintdesk_updateTask', arguments: { taskId: 'SPD-2', status: 'under-review' } },
+    });
+    assert.equal(submitSecondTaskResponse.result.isError, undefined);
+    const needsWorkSnapshot = reviewService.reviewSnapshot('SPD-2').snapshot;
+    const needsWorkPayload: ReceiptPayload = {
+      version: 1,
+      intent: 'review',
+      projectId: 'test-project',
+      taskId: needsWorkSnapshot.taskId,
+      createdAt: needsWorkSnapshot.createdAt,
+      incarnation: randomUUID(),
+      reviewerId: 'reviewer-2',
+      keyId: keyId(testPublicKey),
+      snapshotDigest: digest(needsWorkSnapshot),
+      expectedStatus: 'under-review',
+      operationId: randomUUID(),
+      sequence: 1,
+      timestamp: new Date().toISOString(),
+      criteria: needsWorkSnapshot.criteria.map(criterion => ({ criterion, result: 'needs work' })),
+      evidencePaths: [],
+    };
+    const needsWorkResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 49,
+      method: 'tools/call',
+      params: {
+        name: 'sprintdesk_commitHumanReview',
+        arguments: { receipt: signReceipt(needsWorkPayload, testPrivateKey) },
+      },
+    });
+    const needsWorkTask = JSON.parse(needsWorkResponse.result.content[0].text) as Task;
+    assert.equal(needsWorkTask.status, 'needs-modification');
+    assert.equal(needsWorkTask.review?.summary, 'further work required');
+    assert.equal(needsWorkTask.backlog, 'technical');
+    assert.equal(needsWorkTask.reviewReceipt?.payload.operationId, needsWorkPayload.operationId);
+    assertReviewMarkdown(needsWorkTask, readFileSync(taskTwoPath, 'utf8'));
+    const needsModificationList = await handleRequest({
+      jsonrpc: '2.0',
+      id: 50,
+      method: 'tools/call',
+      params: { name: 'sprintdesk_listTasks', arguments: { status: 'needs-modification' } },
+    });
+    assert.deepEqual(
+      JSON.parse(needsModificationList.result.content[0].text).map((entry: Task) => entry.id),
+      ['task-2'],
+    );
+    const directReworkStatus = await handleRequest({
+      jsonrpc: '2.0',
+      id: 51,
+      method: 'tools/call',
+      params: { name: 'sprintdesk_updateTask', arguments: { taskId: 'SPD-2', status: 'needs-modification' } },
+    });
+    assert.equal(directReworkStatus.result.isError, true);
 
     appendTaskFixture(
       tasksPath,

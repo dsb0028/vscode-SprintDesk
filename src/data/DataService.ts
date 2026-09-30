@@ -3,7 +3,14 @@ import yaml from 'js-yaml';
 import { getHost, getFileSystem, IFileSystem } from '../host';
 import { Config, Task, Epic, Backlog, Sprint, TasksData, EpicsData, BacklogsData, SprintsData, DEFAULT_CONFIG } from './types';
 import { canonical, digest, Enrollment, keyId, SignedReceipt, SnapshotResponse, reviewedMarkdown, verifyReceipt } from '../review/protocol';
-import { authorizeChange, protectedChange, receiptReview, receiptVerification, taskMetadata } from '../review/authorization';
+import {
+  authorizeChange,
+  needsModification,
+  protectedChange,
+  receiptReview,
+  receiptVerification,
+  taskMetadata,
+} from '../review/authorization';
 
 const SPRINTDESK_DIR = '.SprintDesk';
 const SETTINGS_DIR = 'settings';
@@ -240,6 +247,46 @@ export class DataService {
     }
   }
 
+  private commitTasks(tasks: Task[], receipt: SignedReceipt): Task {
+    const tasksPath = path.join(this.getDataPath(), 'tasks.yml');
+    let committed: Task | undefined;
+    const persistAndRead = () => {
+      const previousContent = this.fileSystem.readFile(tasksPath);
+      let persisted = false;
+      try {
+        this.persistTasks(tasks);
+        persisted = true;
+        committed = this.getTask(receipt.payload.taskId);
+        if (!committed) {
+          throw new Error('Approval commit readback failed');
+        }
+        this.assertCommittedApproval(committed, receipt);
+      } catch (error) {
+        if (persisted) {
+          try {
+            if (this.fileSystem.writeAtomic) {
+              this.fileSystem.writeAtomic(tasksPath, previousContent);
+            } else {
+              this.fileSystem.writeFile(tasksPath, previousContent);
+            }
+          } catch (rollbackError) {
+            throw new Error(`Approval commit failed and rollback failed: ${String(rollbackError)}`);
+          }
+        }
+        throw error;
+      }
+    };
+    if (this.fileSystem.withLock) {
+      this.fileSystem.withLock(tasksPath, persistAndRead);
+    } else {
+      persistAndRead();
+    }
+    if (!committed) {
+      throw new Error('Approval commit readback failed');
+    }
+    return committed;
+  }
+
   private persistTasks(tasks: Task[]): void {
     const document = this.loadTaskDocument();
     const previous = document.tasks;
@@ -373,6 +420,29 @@ export class DataService {
     return this.fileSystem.readFile(file);
   }
 
+  private assertCommittedApproval(task: Task, receipt: SignedReceipt): void {
+    const enrollment = this.getReviewEnrollment();
+    verifyReceipt(receipt, enrollment);
+    if (!task.reviewReceipt) {
+      throw new Error('Committed approval is missing its signed review');
+    }
+    verifyReceipt(task.reviewReceipt, enrollment);
+    const response = this.reviewSnapshot(task.id, receipt.payload.evidencePaths);
+    if (receipt.payload.snapshotDigest !== digest(response.snapshot)
+      || (receipt.payload.intent === 'review'
+        && task.status !== (needsModification(receipt) ? 'needs-modification' : 'under-review'))
+      || canonical(task.review ?? null) !== canonical(receiptReview(task.reviewReceipt))
+      || (receipt.payload.intent === 'complete' && (task.status !== 'done' || task.workStatus !== 'done'
+        || receipt.payload.reviewOperationId !== task.reviewReceipt.payload.operationId
+        || task.reviewReceipt.payload.snapshotDigest !== receipt.payload.snapshotDigest
+        || task.reviewReceipt.payload.incarnation !== receipt.payload.incarnation
+        || task.reviewReceipt.payload.sequence >= receipt.payload.sequence
+        || !task.reviewReceipt.payload.criteria.every(entry => entry.result === 'met')
+        || canonical(task.humanVerification ?? null) !== canonical(receiptVerification(receipt, enrollment))))) {
+      throw new Error('Committed approval content has drifted');
+    }
+  }
+
   commitReview(receipt: SignedReceipt): Task {
     const task = this.getTask(receipt.payload.taskId);
     if (!task) {
@@ -380,39 +450,22 @@ export class DataService {
     }
     const stored = receipt.payload.intent === 'complete' ? task.completionReceipt : task.reviewReceipt;
     if (stored && canonical(stored) === canonical(receipt)) {
-      const enrollment = this.getReviewEnrollment();
-      verifyReceipt(receipt, enrollment);
-      if (!task.reviewReceipt) {
-        throw new Error('Committed approval is missing its signed review');
-      }
-      verifyReceipt(task.reviewReceipt, enrollment);
-      const response = this.reviewSnapshot(task.id, receipt.payload.evidencePaths);
-      if (receipt.payload.snapshotDigest !== digest(response.snapshot)
-        || (receipt.payload.intent === 'review' && task.status !== 'under-review')
-        || canonical(task.review ?? null) !== canonical(receiptReview(task.reviewReceipt))
-        || (receipt.payload.intent === 'complete' && (task.status !== 'done' || task.workStatus !== 'done'
-          || receipt.payload.reviewOperationId !== task.reviewReceipt.payload.operationId
-          || task.reviewReceipt.payload.snapshotDigest !== receipt.payload.snapshotDigest
-          || task.reviewReceipt.payload.incarnation !== receipt.payload.incarnation
-          || task.reviewReceipt.payload.sequence >= receipt.payload.sequence
-          || !task.reviewReceipt.payload.criteria.every(entry => entry.result === 'met')
-          || canonical(task.humanVerification ?? null) !== canonical(receiptVerification(receipt, enrollment))))) {
-        throw new Error('Committed approval content has drifted');
-      }
+      this.assertCommittedApproval(task, receipt);
       this.saveTaskMd(task);
       return task;
     }
     const next: Task = receipt.payload.intent === 'review'
-      ? { ...task, review: receiptReview(receipt), reviewReceipt: receipt }
+      ? {
+        ...task,
+        status: needsModification(receipt) ? 'needs-modification' : 'under-review',
+        review: receiptReview(receipt),
+        reviewReceipt: receipt,
+      }
       : { ...task, status: 'done', workStatus: 'done', completionReceipt: receipt,
         humanVerification: receiptVerification(receipt, this.getReviewEnrollment()) };
     const tasks = this.loadTasks().map(entry => entry.id === task.id
       ? { ...next, updatedAt: new Date().toISOString() } : entry);
-    this.saveTasks(tasks);
-    const committed = this.getTask(task.id);
-    if (!committed) {
-      throw new Error('Approval commit readback failed');
-    }
+    const committed = this.commitTasks(tasks, receipt);
     this.saveTaskMd(committed);
     return committed;
   }
@@ -683,7 +736,7 @@ getTask(taskId: string): Task | undefined {
   }
 
   private generateReviewTemplate(task: Task): string {
-    if (task.status !== 'under-review' || !task.review?.criteria.length) {
+    if (!['under-review', 'needs-modification'].includes(task.status) || !task.review?.criteria.length) {
       return '';
     }
 
@@ -856,7 +909,9 @@ getTask(taskId: string): Task | undefined {
 
     md += `## 📋 Tasks\n`;
     for (const task of tasks) {
-      const statusEmoji = task.status === 'done' ? '✅' : task.status === 'in-progress' ? '🔄' : '⏳';
+      const statusEmoji = task.status === 'done' ? '✅'
+        : task.status === 'in-progress' ? '🔄'
+          : task.status === 'needs-modification' ? '🛠️' : '⏳';
       const fname = this.getTaskFilename(task);
       md += `- ${statusEmoji} [${task.title}](../Tasks/${fname}) ${task.status}\n`;
     }
@@ -873,7 +928,9 @@ getTask(taskId: string): Task | undefined {
 
     md += `## 🧱 Tasks\n`;
     for (const task of tasks) {
-      const taskStatusEmoji = task.status === 'done' ? '✅' : task.status === 'in-progress' ? '🔄' : '⏳';
+      const taskStatusEmoji = task.status === 'done' ? '✅'
+        : task.status === 'in-progress' ? '🔄'
+          : task.status === 'needs-modification' ? '🛠️' : '⏳';
       const fname = this.getTaskFilename(task);
       md += `- ${taskStatusEmoji} [${task.title}](../Tasks/${fname})\n`;
     }
@@ -890,7 +947,9 @@ getTask(taskId: string): Task | undefined {
 
     md += `## 📋 Tasks\n`;
     for (const task of tasks) {
-      const taskStatusEmoji = task.status === 'done' ? '✅' : task.status === 'in-progress' ? '🔄' : '⏳';
+      const taskStatusEmoji = task.status === 'done' ? '✅'
+        : task.status === 'in-progress' ? '🔄'
+          : task.status === 'needs-modification' ? '🛠️' : '⏳';
       const fname = this.getTaskFilename(task);
       md += `- ${taskStatusEmoji} [${task.title}](../Tasks/${fname}) ${task.status}\n`;
     }

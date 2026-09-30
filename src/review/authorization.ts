@@ -13,6 +13,10 @@ export function receiptReview(receipt: SignedReceipt): TaskReview {
   };
 }
 
+export function needsModification(receipt: SignedReceipt): boolean {
+  return receipt.payload.criteria.some(entry => entry.result === 'needs work');
+}
+
 export function receiptVerification(receipt: SignedReceipt, enrollment: Enrollment): HumanVerification {
   return {
     reviewerId: enrollment.reviewerId,
@@ -36,13 +40,14 @@ function same(left: unknown, right: unknown): boolean {
 
 export function protectedChange(before: Task | undefined, after: Task): boolean {
   if (!before) {
-    return after.status === 'done' || after.workStatus === 'done' || !!after.humanVerification
+    return after.status === 'done' || after.status === 'needs-modification' || after.workStatus === 'done' || !!after.humanVerification
       || !!after.reviewReceipt || !!after.completionReceipt
       || !!after.review && (after.review.summary !== 'pending'
         || !!after.review.reviewerId || !!after.review.reviewedAt
         || after.review.criteria.some(entry => entry.result || entry.reviewerId || entry.verifiedAt));
   }
   return (after.status === 'done' && before.status !== 'done')
+    || (after.status === 'needs-modification' && before.status !== 'needs-modification')
     || (after.workStatus === 'done' && before.workStatus !== 'done')
     || !same(before.humanVerification, after.humanVerification)
     || !same(before.reviewReceipt, after.reviewReceipt)
@@ -88,10 +93,11 @@ export function authorizeChange(
       || !same(after.review, before.review) || !same(after.reviewReceipt, before.reviewReceipt)) {
       throw new Error('Completion needs separate signed intent and an all-met current review');
     }
-  } else if (p.intent !== 'review' || after.status !== before.status
+  } else if (p.intent !== 'review'
+    || after.status !== (needsModification(receipt) ? 'needs-modification' : 'under-review')
     || after.workStatus !== before.workStatus || !same(after.review, receiptReview(receipt))
     || !same(before.humanVerification, after.humanVerification)
     || !same(before.completionReceipt, after.completionReceipt)) {
-    throw new Error('Review approval cannot change status or completion verification');
+    throw new Error('Review approval must preserve lifecycle state except for a signed needs-work rework transition');
   }
 }

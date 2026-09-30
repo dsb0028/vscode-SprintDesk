@@ -51,6 +51,8 @@ try {
   ds.updateTask(task.id, { status: 'under-review', review: {
     summary: 'pending', criteria: ds.getTaskAcceptanceCriteria(task).map(criterion => ({ criterion })),
   } });
+  assert.throws(() => ds.updateTask(task.id, { status: 'needs-modification' }), /signed|approval|authorization/i);
+  assert.equal(ds.getTask(task.id)?.status, 'under-review');
   ds.saveTaskMd(ds.getTask(task.id)!);
   writeFileSync(markdownPath, reviewedMarkdown(readFileSync(markdownPath, 'utf8')));
   const keys = generateKeyPairSync('ed25519');
@@ -88,30 +90,20 @@ try {
   }
   assert.throws(() => ds.commitReview({ ...signed(), signature: Buffer.alloc(64).toString('base64') }),
     /signature/);
-  const rejected = ds.commitReview(signed({
-    criteria: base.criteria.map((entry, index) => ({ ...entry, result: index ? 'needs work' : 'met' })),
-  }));
-  assert.equal(rejected.review?.summary, 'further work required');
-  assert.deepEqual(ds.reviewSnapshot(task.id).snapshot, snapshot);
-  assert.throws(() => ds.commitReview(signed({
-    intent: 'complete', sequence: 2, operationId: randomUUID(),
-    reviewOperationId: rejected.reviewReceipt?.payload.operationId,
-  })), /all-met/);
-  assert.throws(() => ds.updateTask(task.id, { review: receiptReview(signed()) }), /signed|replayed/);
-  const acceptedReceipt = signed({ sequence: 2, operationId: randomUUID() });
+  const acceptedReceipt = signed();
   const accepted = ds.commitReview(acceptedReceipt);
   assert.equal(accepted.status, 'under-review');
   assert.equal(accepted.review?.summary, 'accepted');
   assert.equal(ds.reviewSnapshot(task.id).snapshot.markdown, snapshot.markdown);
   assert.deepEqual(ds.commitReview(acceptedReceipt), accepted);
-  assert.throws(() => ds.commitReview(signed()), /replayed/);
+  assert.throws(() => ds.commitReview(signed({ operationId: randomUUID() })), /replayed/);
   assert.throws(() => ds.commitReview(signed({
     sequence: 3, operationId: randomUUID(), incarnation: randomUUID(),
   })), /mismatched/);
   const original = readFileSync(markdownPath, 'utf8');
   writeFileSync(markdownPath, `${original}\nChanged evidence\n`);
   const completion = signed({
-    intent: 'complete', sequence: 3, operationId: randomUUID(),
+    intent: 'complete', sequence: 2, operationId: randomUUID(),
     reviewOperationId: acceptedReceipt.payload.operationId,
   });
   assert.throws(() => ds.commitReview(completion), /mismatched/);
@@ -132,17 +124,92 @@ try {
   assert.throws(() => ds.commitReview(completion), /disk failure/);
   assert.equal(existsSync(join(workspace, '.SprintDesk', 'data', 'tasks.yml.lock')), false);
   assert.equal(readFileSync(join(workspace, '.SprintDesk', 'data', 'tasks.yml'), 'utf8'), beforeFailure);
+  class FailingReadbackFileSystem extends NodeFileSystem {
+    private persisted = false;
+
+    writeAtomic(filePath: string, content: string): void {
+      super.writeAtomic(filePath, content);
+      this.persisted = true;
+    }
+
+    readFile(filePath: string): string {
+      if (this.persisted && filePath.endsWith('tasks.yml')) {
+        throw new Error('Injected readback failure');
+      }
+      return super.readFile(filePath);
+    }
+  }
+  setFileSystem(new FailingReadbackFileSystem());
+  assert.throws(() => ds.commitReview(completion), /readback failure/);
+  assert.equal(existsSync(join(workspace, '.SprintDesk', 'data', 'tasks.yml.lock')), false);
+  assert.equal(readFileSync(join(workspace, '.SprintDesk', 'data', 'tasks.yml'), 'utf8'), beforeFailure);
   setFileSystem(new NodeFileSystem());
   const done = ds.commitReview(completion);
   assert.equal(done.status, 'done');
   assert.equal(done.workStatus, 'done');
   assert.equal(done.humanVerification?.approvedAt, completion.payload.timestamp);
   assert.deepEqual(ds.commitReview(completion), done);
-  assert.deepEqual(ds.getReviewAudit().map(receipt => receipt.payload.sequence), [1, 2, 3]);
+  assert.deepEqual(ds.getReviewAudit().map(receipt => receipt.payload.sequence), [1, 2]);
   assert.throws(() => ds.commitReview(signed({
-    intent: 'complete', sequence: 3, operationId: randomUUID(),
+    intent: 'complete', sequence: 2, operationId: randomUUID(),
     reviewOperationId: acceptedReceipt.payload.operationId,
   })), /replayed|mismatched/);
+
+  const reworkTask: Task = {
+    ...task,
+    id: 'needs-work-fixture',
+    number: 2,
+    code: 'SPD-2',
+    name: 'needs-work-fixture',
+    title: 'Needs-work fixture',
+    status: 'waiting',
+    createdAt: '2026-01-02T00:00:00Z',
+    updatedAt: '2026-01-02T00:00:00Z',
+  };
+  ds.addTask(reworkTask);
+  ds.saveTaskMd(reworkTask);
+  const reworkMarkdownPath = join(ds.getTasksDir(), ds.getTaskFilename(reworkTask));
+  writeFileSync(reworkMarkdownPath, '# Task\n\n## ✅ Acceptance Criteria\n- First\n- Second\n\n## 📝 Notes\nEvidence v1\n');
+  ds.updateTask(reworkTask.id, {
+    status: 'under-review',
+    review: {
+      summary: 'pending',
+      criteria: ds.getTaskAcceptanceCriteria(reworkTask).map(criterion => ({ criterion })),
+    },
+  });
+  ds.saveTaskMd(ds.getTask(reworkTask.id)!);
+  const reworkSnapshot = ds.reviewSnapshot(reworkTask.id).snapshot;
+  const needsWorkReceipt = signReceipt({
+    ...base,
+    taskId: reworkTask.id,
+    createdAt: reworkTask.createdAt,
+    incarnation: randomUUID(),
+    snapshotDigest: digest(reworkSnapshot),
+    operationId: randomUUID(),
+    sequence: 1,
+    criteria: reworkSnapshot.criteria.map((criterion, index) => ({
+      criterion,
+      result: index ? 'needs work' : 'met',
+    })),
+  }, privateKey);
+  const needsWork = ds.commitReview(needsWorkReceipt);
+  assert.equal(needsWork.status, 'needs-modification');
+  assert.equal(needsWork.review?.summary, 'further work required');
+  assert.equal(needsWork.backlog, reworkTask.backlog);
+  assert.deepEqual(ds.reviewSnapshot(reworkTask.id).snapshot, reworkSnapshot);
+  assert.deepEqual(ds.commitReview(needsWorkReceipt), needsWork);
+  assert.throws(() => ds.commitReview(signReceipt({
+    ...needsWorkReceipt.payload,
+    intent: 'complete',
+    operationId: randomUUID(),
+    sequence: 2,
+    reviewOperationId: needsWorkReceipt.payload.operationId,
+  }, privateKey)), /under-review|all-met|replayed/);
+  assert.throws(() => ds.commitReview(signReceipt({
+    ...needsWorkReceipt.payload,
+    operationId: randomUUID(),
+    sequence: 2,
+  }, privateKey)), /under-review|mismatched/);
   assert.throws(() => ds.enrollReview({ ...enrollment, reviewerId: 'replacement' }), /replacement/);
   ds.deleteTask(task.id);
   ds.addTask({ ...task, status: 'under-review' });

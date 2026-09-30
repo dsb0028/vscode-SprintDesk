@@ -12,6 +12,9 @@ A productivity extension for managing tasks, epics, backlogs, and sprints direct
 - **Sprint Planning:** Move tasks from backlogs to sprints for active development.
 - **Task Calendar:** Browse sprint-colored task cards, date-range ribbons, and an interactive task-details sidebar.
 - **Human Review:** Guided, individually confirmed decisions in a separately installed local reviewer companion. Signed review and separate completion receipts replace caller-supplied approval. See [Authenticated Review](docs/authenticated-review.md).
+- **Needs Modification:** A verified signed Needs-work review transitions an
+  Under Review task to **Needs Modification** while retaining its review
+  receipt and feedback; all-met review and Done remain separate flows.
 - **Human Reviewer Registry:** Discover registered reviewers through the owner-only registry. Registration alone cannot authorize approval. See [Reviewer Registry](docs/reviewer-registry.md).
 - **VSCode Integration:** Access all features from the sidebar and command palette.
 - **Markdown Linking:** Tasks, epics, and backlogs are interlinked using Markdown for easy navigation.

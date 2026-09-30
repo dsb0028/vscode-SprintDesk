@@ -34,7 +34,7 @@ const evidence=document.getElementById('evidence');
 const headings={
  enroll:'Set up your local reviewer identity',load:'Choose a task to review',
  criterion:'Review one acceptance criterion',summary:'Check and confirm your review',
- reviewed:'Review submitted — further work required',complete:'Review accepted — ready to complete',
+ reviewed:'Review submitted — needs modification',complete:'Review accepted — ready to complete',
  completionSummary:'Confirm task completion',done:'Task is Done',
  uncertain:'Check whether your last action was accepted',error:'Resolve the issue before continuing',
  revoked:'Local reviewer key revoked'
@@ -142,7 +142,7 @@ window.addEventListener('message',event=>{
      button(controls,'Review completion for '+name,'complete-summary');
    }
    if(state.phase==='reviewed')text(controls,'p',receiptVerified?
-     'Your needs-work review has been submitted and its receipt verified. The criteria are not all met; further work is required. This does not mark the task Done.':
+     'Your needs-work review has been submitted and its receipt verified. The task is now Needs Modification; it remains detached from active backlog work and cannot be completed from this review.':
      'Review submission is not yet independently verified in this view. The reported task status above does not establish that the criteria are met.');
    if(state.phase==='done')text(controls,'p',receiptVerified?
      'Completion has been read back. Check the actual task status above.':
@@ -156,7 +156,7 @@ window.addEventListener('message',event=>{
    }
    const advanced=disclosure(controls,'advanced','Advanced: fresh review, recovery, and key management');
    text(advanced,'p','These controls are separate from review approval. Recovery does not create a new signature.');
-   if(['complete','reviewed'].includes(state.phase))button(advanced,'Begin fresh per-criterion review (no inherited decisions)','new-review');
+   if(state.phase==='complete')button(advanced,'Begin fresh per-criterion review (no inherited decisions)','new-review');
    if(['uncertain','error','revoked'].includes(state.phase)){
      button(advanced,'Read back durable receipt to reconcile','reconcile');button(advanced,'Retry identical durable receipt (no new signature)','retry');
      button(advanced,'Recover original inaccessible identity','unblock');

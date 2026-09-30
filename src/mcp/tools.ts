@@ -27,7 +27,7 @@ export const TASK_TOOLS = [
   },
   {
     name: 'sprintdesk_updateTask',
-    description: 'Edit ordinary task metadata or submit under-review. Review decisions and done require the enrolled local reviewer UI, not caller-supplied verification.',
+    description: 'Edit ordinary task metadata or submit under-review. Review decisions, Needs Modification, and done require the enrolled local reviewer UI, not caller-supplied verification.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -96,7 +96,10 @@ export const TASK_TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        status: { type: 'string', enum: ['waiting', 'in-progress', 'under-review', 'done', 'blocked', 'cancelled'] },
+        status: {
+          type: 'string',
+          enum: ['waiting', 'in-progress', 'under-review', 'needs-modification', 'done', 'blocked', 'cancelled']
+        },
         limit: { type: 'number', description: 'Max tasks to return' },
       },
     },

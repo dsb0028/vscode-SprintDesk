@@ -89,21 +89,13 @@ async function run(workStatus, existingHandoff) {
       return receipt;
     }
     await commit('review', ['met', 'needs work']);
-    assert.equal(current.status, 'under-review');
+    assert.equal(current.status, 'needs-modification');
     assert.equal(current.workStatus, workStatus);
     assert.equal(current.review.summary, 'further work required');
     assert.throws(() => payload(root, ledger, current.snapshot, 'complete', []), /all-met/);
-    const review = await commit('review', ['met', 'met']);
-    assert.equal(current.review.summary, 'accepted');
-    assert.equal(current.workStatus, workStatus);
-    const completion = await commit('complete');
-    assert.equal(current.status, 'done'); assert.equal(current.workStatus, 'done');
-    assert.equal(completion.payload.sequence, 3);
-    assert.equal(completion.payload.reviewOperationId, review.payload.operationId);
-    assert.equal(current.humanVerification.approvedAt, completion.payload.timestamp);
     const raw = await readSource(files, directory, enrollment.projectId, task.id, [], ds.reviewSnapshot(task.id));
     assert.ok(raw.rawYaml.includes('approvals:'));
-    console.log(`PASS actual parent DataService ${existingHandoff ? 'existing' : 'first-insertion'} handoff ${workStatus ?? '(undefined)'}: needs-work -> accepted -> completion; full snapshot stable; durable intent before delivery`);
+    console.log(`PASS actual parent DataService ${existingHandoff ? 'existing' : 'first-insertion'} handoff ${workStatus ?? '(undefined)'}: needs-work -> Needs Modification; full snapshot stable; durable intent before delivery`);
   } finally {
     if (lease) await lease.release();
     await fs.rm(directory, { recursive: true, force: true });

@@ -33,6 +33,15 @@ export interface LocalRoot {
   archives: TaskLedger[];
 }
 
+function projectedStatus(receipt: SignedReceipt): 'under-review' | 'needs-modification' | 'done' {
+  if (receipt.payload.intent === 'complete') {
+    return 'done';
+  }
+  return receipt.payload.criteria.some(entry => entry.result === 'needs work')
+    ? 'needs-modification'
+    : 'under-review';
+}
+
 export function assertPlacement(scheme: string, kind: number | undefined, appHost: string): void {
   if (scheme !== 'file' || kind !== 1 || appHost !== 'desktop') {
     throw new Error('Local desktop UI extension placement required. Never enroll a workspace-host extension.');
@@ -170,7 +179,7 @@ export function verifyProjection(response: SnapshotResponse, receipt: SignedRece
   if (!localOperation) { throw new Error('Receipt has no independent local intent.'); }
   if (digest(response.snapshot) !== p.snapshotDigest
     || response.snapshot.taskId !== p.taskId || response.snapshot.createdAt !== p.createdAt
-    || response.status !== (p.intent === 'review' ? 'under-review' : 'done')
+    || response.status !== projectedStatus(receipt)
     || response.workStatus !== (p.intent === 'review' ? localOperation.expectedWorkStatus : 'done')
     || canonical(p.intent === 'review' ? response.reviewReceipt ?? null : response.completionReceipt ?? null)
       !== canonical(receipt)) {
@@ -210,7 +219,8 @@ export function reconcile(root: LocalRoot, task: TaskLedger, response: SnapshotR
   if (!latest) {
     const review = response.review as Record<string, unknown> | undefined;
     if (response.reviewReceipt || response.completionReceipt || response.humanVerification
-      || response.status === 'done' || review && review.summary !== 'pending') {
+      || response.status === 'done' || response.status === 'needs-modification'
+      || review && review.summary !== 'pending') {
       throw new Error('UNATTESTED: remote approval has no independent local ledger entry.');
     }
     return;

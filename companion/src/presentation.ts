@@ -18,7 +18,7 @@ const PHASE_ACTIONS: Record<ReviewPhase, readonly string[]> = {
   summary: ['confirm-review', 'discard', 'revoke'],
   complete: ['complete-summary', 'new-review', 'load', 'revoke'],
   completionSummary: ['confirm-complete', 'cancel', 'revoke'],
-  reviewed: ['new-review', 'load', 'revoke'],
+  reviewed: ['load', 'revoke'],
   done: ['load', 'revoke'],
   uncertain: ['reconcile', 'retry', 'unblock'],
   error: ['load', 'discard', 'reset', 'unblock', 'revoke', 'mirror', 'reconcile', 'retry'],

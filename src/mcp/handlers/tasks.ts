@@ -93,7 +93,8 @@ async function handle_sprintdesk_updateTask(args: any): Promise<HandlerResult> {
   if (!task) return res(`Task not found: ${args.taskId}`, true);
 
   const updates: Partial<Task> = {};
-  if (args.status === 'done' || args.humanVerification !== undefined || args.review !== undefined) {
+  if (args.status === 'done' || args.status === 'needs-modification'
+    || args.humanVerification !== undefined || args.review !== undefined) {
     return res('Protected approval writes require the local reviewer companion UI. Use sprintdesk_requestHumanReview; reviewer IDs or chat consent alone cannot approve.', true);
   }
   if (args.title) updates.title = args.title;

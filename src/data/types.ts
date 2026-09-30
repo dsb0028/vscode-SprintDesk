@@ -34,7 +34,14 @@ export interface Task {
   completionReceipt?: SignedReceipt;
 }
 
-export type TaskStatus = 'waiting' | 'in-progress' | 'under-review' | 'done' | 'blocked' | 'cancelled';
+export type TaskStatus =
+  | 'waiting'
+  | 'in-progress'
+  | 'under-review'
+  | 'needs-modification'
+  | 'done'
+  | 'blocked'
+  | 'cancelled';
 
 export type ReviewResult = 'met' | 'needs work';
 export type ReviewSummary = 'pending' | 'accepted' | 'further work required';

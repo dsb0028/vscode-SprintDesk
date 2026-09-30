@@ -14,9 +14,12 @@ arguments, even when the caller supplies a registered reviewer ID or a
 Evidence paths are bounded, repository-relative text files outside
 `.SprintDesk`. Selected bytes, ordered criteria, description, notes and task
 metadata are hashed. Generated handoff text is a projection. A signed review
-records every result while keeping the task Under Review. Separate signed
-completion requires the current all-met review and changes status/work status
-to Done. Rejection leaves the task unchanged.
+records every result. An all-met signed review keeps the task Under Review;
+one or more `needs work` results atomically changes it to
+`needs-modification` (**Needs Modification**) while retaining the signed
+review, receipt, and feedback. Separate signed completion requires the current
+all-met review and changes status/work status to Done. Rejection leaves the
+task unchanged.
 
 Missing enrollment, invalid signatures, wrong intent/task/project/key, changed
 content, reused operations and stale sequence numbers fail explicitly.
@@ -32,6 +35,10 @@ See [lock recovery](authenticated-review.md#mutation-routes-and-recovery).
 If Markdown refresh
 fails after the commit, inspect readback and retry delivery of the same receipt;
 never generate substitute human consent.
+
+`needs-modification` is available in task reads and `sprintdesk_listTasks`
+filters. It is intentionally not accepted by `sprintdesk_updateTask`: only a
+valid, current signed Needs-work review can create this rework status.
 
 Remote responses and YAML are not independent proof. Use the
 [local companion](../companion/README.md) to check them against locally retained

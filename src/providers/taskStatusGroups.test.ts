@@ -25,22 +25,25 @@ const sourceTasks = [
   createTask(10, 'in-progress'),
   createTask(30, 'blocked'),
   createTask(15, 'in-progress'),
+  createTask(25, 'needs-modification'),
   createTask(40, 'done'),
 ];
 const groups = groupTasksByStatus(sourceTasks);
 
 assert.deepEqual(groups.map(group => group.status), [
   'in-progress',
+  'needs-modification',
   'blocked',
   'waiting',
   'done',
 ]);
 assert.deepEqual(groups.map(group => [group.label, group.defaultExpanded]), [
   ['In Progress', true],
+  ['Needs Modification', true],
   ['Blocked', true],
   ['Waiting', false],
   ['Done', false],
 ]);
 assert.deepEqual(groups[0].tasks.map(task => task.number), [10, 15]);
-assert.deepEqual(sourceTasks.map(task => task.number), [20, 10, 30, 15, 40]);
+assert.deepEqual(sourceTasks.map(task => task.number), [20, 10, 30, 15, 25, 40]);
 assert.deepEqual(groupTasksByStatus([]), []);

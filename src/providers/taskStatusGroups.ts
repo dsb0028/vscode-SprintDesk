@@ -16,6 +16,7 @@ interface StatusDefinition {
 const STATUS_DEFINITIONS: readonly StatusDefinition[] = [
   { status: 'in-progress', label: 'In Progress', defaultExpanded: true },
   { status: 'under-review', label: 'Under Review', defaultExpanded: true },
+  { status: 'needs-modification', label: 'Needs Modification', defaultExpanded: true },
   { status: 'blocked', label: 'Blocked', defaultExpanded: true },
   { status: 'waiting', label: 'Waiting', defaultExpanded: false },
   { status: 'done', label: 'Done', defaultExpanded: false },
