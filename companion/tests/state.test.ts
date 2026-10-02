@@ -20,7 +20,18 @@ function fixture() {
     enrollment, keys: [enrollment], revoked: false, tasks: {}, archives: [] };
   const snapshot: ReviewSnapshot = { version: 1, projectId: enrollment.projectId, taskId: 'SPD-1',
     createdAt: '2026-09-29T12:00:00.000Z', metadata: { title: '<script>untrusted</script>' },
-    criteria: ['Tests pass', 'Docs accurate'], markdown: '# Task\nEvidence',
+    criteria: ['Tests pass', 'Docs accurate'], markdown: `# Task
+
+## Evidence
+
+### Criterion 1
+
+Tests passed.
+
+### Criterion 2
+
+Documentation was inspected.
+`,
     evidence: [{ path: 'results.txt', content: 'actual evidence\n' }] };
   const task = observeTask(root, snapshot);
   const draft = resumeDraft(task, snapshot, ['results.txt']);
@@ -77,6 +88,21 @@ test('one criterion at a time; needs-evidence persists locally and cannot sign',
   decide(draft, snapshot, 1, 'needs work');
   assert.equal(payload(root, task, snapshot, 'review', ['results.txt']).criteria[1].result, 'needs work');
   assert.throws(() => decide(draft, snapshot, 1, 'met'), /single/);
+});
+test('review signing requires task-local evidence for every exact criterion', () => {
+  const { root, snapshot, task, draft } = fixture();
+  decide(draft, snapshot, 0, 'met'); decide(draft, snapshot, 1, 'met');
+  assert.throws(() => payload(root, task, { ...snapshot, markdown: '# Task' }, 'review', ['results.txt']),
+    /## Evidence/);
+  assert.throws(() => payload(root, task, {
+    ...snapshot,
+    markdown: `## Evidence
+
+### Criterion 1
+
+Only the first criterion is covered.
+`,
+  }, 'review', ['results.txt']), /Criterion N/);
 });
 test('restart resumes unchanged draft only; changed snapshot/evidence never inherits consent', () => {
   const { root, snapshot, task, draft } = fixture();
@@ -166,7 +192,10 @@ test('needs-work review cannot complete; drift, revocation and wrong sequence ca
   recordIntent(root, task, review, 'review'); reconcile(root, task, projected(snapshot, review));
   assert.equal(projected(snapshot, review).status, 'needs-modification');
   assert.throws(() => payload(root, task, snapshot, 'complete', ['results.txt']), /all-met/);
-  assert.throws(() => payload(root, task, { ...snapshot, markdown: 'changed' }, 'review', ['results.txt']), /Every/);
+  assert.throws(() => payload(root, task, {
+    ...snapshot,
+    markdown: `${snapshot.markdown}\nChanged evidence.`,
+  }, 'review', ['results.txt']), /Every/);
   assert.throws(() => recordIntent(root, task, signReceipt({ ...review.payload, sequence: 1 }, privateKey)), /sequence/);
   root.revoked = true;
   assert.throws(() => payload(root, task, snapshot, 'review', ['results.txt']), /Revoked/);

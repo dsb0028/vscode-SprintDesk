@@ -48,7 +48,25 @@ async function fixture(run) {
     service.addTask(task);
     await fs.mkdir(path.dirname(task.path), { recursive: true });
     await fs.writeFile(task.path,
-      '# Task\n\n## ✅ Acceptance Criteria\n- First exact criterion\n- Second exact criterion\n\n## 📝 Notes\nActual evidence\n');
+      `# Task
+
+## ✅ Acceptance Criteria
+- First exact criterion
+- Second exact criterion
+
+## Evidence
+
+### Criterion 1
+
+First actual result.
+
+### Criterion 2
+
+Second actual result.
+
+## 📝 Notes
+Actual evidence
+`);
     const pair = generateKeyPairSync('ed25519');
     const publicKey = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
     const secret = pair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();

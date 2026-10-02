@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { dump, load } from 'js-yaml';
@@ -64,6 +64,146 @@ function assertReviewMarkdown(task: Task, markdown: string): void {
   assert.ok(handoff);
   assert.equal(`### Review Handoff${handoff}`.trim(), expected.join('\n'));
   assert.equal(markdown.match(/^### Review Handoff$/gm)?.length, 1);
+}
+
+class EvidenceFailureFileSystem extends NodeFileSystem {
+  constructor(
+    private readonly evidencePath: string,
+    private readonly failure: 'write' | 'readback' | 'mismatch',
+  ) {
+    super();
+  }
+
+  private written = false;
+
+  override writeFile(filePath: string, content: string): void {
+    if (filePath === this.evidencePath && this.failure === 'write') {
+      throw new Error('Evidence write failed');
+    }
+    super.writeFile(filePath, content);
+    if (filePath === this.evidencePath) {
+      this.written = true;
+    }
+  }
+
+  override readFile(filePath: string): string {
+    if (filePath === this.evidencePath && this.written) {
+      if (this.failure === 'readback') {
+        throw new Error('Evidence readback failed');
+      }
+      if (this.failure === 'mismatch') {
+        return super.readFile(filePath).replace('Focused test result.', 'Changed evidence.');
+      }
+    }
+    return super.readFile(filePath);
+  }
+}
+
+async function testEvidenceOnlyHandoff(
+  tasksPath: string, markdownPath: string, startedTask: Task,
+): Promise<void> {
+  const originalYaml = readFileSync(tasksPath, 'utf8');
+  const originalMarkdown = readFileSync(markdownPath, 'utf8');
+  const evidence = [
+    { criterion: 'Verify the first criterion.', content: 'Focused test result.' },
+    {
+      criterion: 'Verify the second criterion across a wrapped line.',
+      content: 'Documentation check result.',
+    },
+  ];
+  const call = (args: unknown) => handleRequest({
+    jsonrpc: '2.0',
+    id: 90,
+    method: 'tools/call',
+    params: { name: 'sprintdesk_recordTaskEvidence', arguments: args },
+  });
+  const rejectedInputs: unknown[] = [
+    { taskId: 'missing', evidence },
+    { taskId: '', evidence },
+    { taskId: 1, evidence },
+    { taskId: 'SPD-1' },
+    { taskId: 'SPD-1', evidence: [] },
+    { taskId: 'SPD-1', evidence: [...evidence].reverse() },
+    { taskId: 'SPD-1', evidence: [evidence[0]] },
+    { taskId: 'SPD-1', evidence: [...evidence, evidence[0]] },
+    { taskId: 'SPD-1', evidence: [null, evidence[1]] },
+    { taskId: 'SPD-1', evidence: [{ criterion: evidence[0].criterion, content: ' ' }, evidence[1]] },
+    { taskId: 'SPD-1', evidence: [{ criterion: 'Different criterion', content: 'Result' }, evidence[1]] },
+    { taskId: 'SPD-1', evidence: [{ criterion: evidence[0].criterion, content: 42 }, evidence[1]] },
+    { taskId: 'SPD-1', evidence: [{ ...evidence[0], result: 'met' }, evidence[1]] },
+    { taskId: 'SPD-1', evidence: 'not an array' },
+  ];
+  for (const field of ['status', 'workStatus', 'runId', 'agentId', 'agent', 'review', 'humanVerification', 'receipt']) {
+    rejectedInputs.push({ taskId: 'SPD-1', evidence, [field]: 'forbidden' });
+  }
+  for (const input of rejectedInputs) {
+    const response = await call(input);
+    assert.equal(response.result.isError, true, JSON.stringify(input));
+    assert.equal(readFileSync(tasksPath, 'utf8'), originalYaml);
+    assert.equal(readFileSync(markdownPath, 'utf8'), originalMarkdown);
+  }
+  const rejectedStatuses: Task['status'][] = [
+    'waiting', 'under-review', 'needs-modification', 'done', 'blocked', 'cancelled',
+  ];
+  for (const status of rejectedStatuses) {
+    const data = load(originalYaml) as { tasks: Task[] };
+    data.tasks[0].status = status;
+    const changedYaml = dump(data);
+    writeFileSync(tasksPath, changedYaml);
+    const response = await call({ taskId: 'SPD-1', evidence });
+    assert.equal(response.result.isError, true);
+    assert.match(response.result.content[0].text, /in-progress/);
+    assert.equal(readFileSync(tasksPath, 'utf8'), changedYaml);
+    assert.equal(readFileSync(markdownPath, 'utf8'), originalMarkdown);
+  }
+  writeFileSync(tasksPath, originalYaml);
+  writeFileSync(markdownPath, originalMarkdown.replace(
+    /## ✅ Acceptance Criteria[\s\S]*?(?=\n## )/, '## ✅ Acceptance Criteria\n',
+  ));
+  const emptyCriteriaMarkdown = readFileSync(markdownPath, 'utf8');
+  const emptyCriteriaResponse = await call({ taskId: 'SPD-1', evidence: [] });
+  assert.equal(emptyCriteriaResponse.result.isError, true);
+  assert.equal(readFileSync(markdownPath, 'utf8'), emptyCriteriaMarkdown);
+  assert.equal(readFileSync(tasksPath, 'utf8'), originalYaml);
+  writeFileSync(markdownPath, originalMarkdown);
+
+  for (const failure of ['write', 'readback', 'mismatch'] as const) {
+    setFileSystem(new EvidenceFailureFileSystem(markdownPath, failure));
+    try {
+      const response = await call({ taskId: 'SPD-1', evidence });
+      assert.equal(response.result.isError, true);
+      assert.match(response.result.content[0].text, /failed|readback/i);
+      assert.equal(readFileSync(tasksPath, 'utf8'), originalYaml);
+      if (failure === 'write') {
+        assert.equal(readFileSync(markdownPath, 'utf8'), originalMarkdown);
+      }
+    } finally {
+      setFileSystem(new NodeFileSystem());
+      writeFileSync(markdownPath, originalMarkdown);
+    }
+  }
+
+  const runsPath = join(tasksPath, '..', 'runs.yml');
+  const runsYaml = 'runs:\n  - id: fixture-run\n    taskId: task-1\n    status: running\n';
+  writeFileSync(runsPath, runsYaml);
+  const response = await call({ taskId: 'SPD-1', evidence });
+  assert.equal(response.result.isError, undefined);
+  const saved = JSON.parse(response.result.content[0].text);
+  assert.deepEqual(saved.task, startedTask);
+  assert.equal(saved.markdown, readFileSync(markdownPath, 'utf8'));
+  assert.equal(readFileSync(tasksPath, 'utf8'), originalYaml);
+  assert.equal(readFileSync(runsPath, 'utf8'), runsYaml);
+  assert.match(saved.markdown, /### Criterion 1\n\nFocused test result\./);
+  assert.match(saved.markdown, /### Criterion 2\n\nDocumentation check result\./);
+  assert.match(saved.markdown, /Keep this description\./);
+  assert.match(saved.markdown, /Keep this note\./);
+  const repeated = await call({ taskId: startedTask.id, evidence });
+  assert.equal(repeated.result.isError, undefined);
+  assert.equal(readFileSync(markdownPath, 'utf8'), saved.markdown);
+  assert.equal(readFileSync(tasksPath, 'utf8'), originalYaml);
+  assert.equal(readFileSync(runsPath, 'utf8'), runsYaml);
+  assert.equal(saved.markdown.match(/^## Evidence$/gm)?.length, 1);
+  unlinkSync(runsPath);
 }
 
 async function runMcpCoreTests(): Promise<void> {
@@ -183,6 +323,11 @@ Keep this note.
     assert.ok(toolNames.includes('sprintdesk_requestHumanReview'));
     assert.ok(toolNames.includes('sprintdesk_getReviewSnapshot'));
     assert.ok(toolNames.includes('sprintdesk_commitHumanReview'));
+    assert.ok(toolNames.includes('sprintdesk_recordTaskEvidence'));
+    const evidenceTool = toolsResponse.result.tools.find((tool: { name: string }) => tool.name === 'sprintdesk_recordTaskEvidence');
+    assert.deepEqual(evidenceTool.inputSchema.required, ['taskId', 'evidence']);
+    assert.equal(evidenceTool.inputSchema.additionalProperties, false);
+    assert.equal(evidenceTool.inputSchema.properties.evidence.items.additionalProperties, false);
 
     const unauthorizedRegistration = await handleRequest({
       jsonrpc: '2.0',
@@ -266,6 +411,23 @@ Keep this note.
     });
     const startedTask: Task = JSON.parse(startedResponse.result.content[0].text);
     assert.equal(startedTask.status, 'in-progress');
+    const missingEvidenceResponse = await handleRequest({
+      jsonrpc: '2.0',
+      id: 81,
+      method: 'tools/call',
+      params: { name: 'sprintdesk_tasksComplete', arguments: { taskId: 'SPD-1' } },
+    });
+    assert.equal(missingEvidenceResponse.result.isError, true);
+    assert.match(missingEvidenceResponse.result.content[0].text, /evidence/i);
+    assert.equal(JSON.parse((await handleRequest({
+      jsonrpc: '2.0',
+      id: 82,
+      method: 'tools/call',
+      params: { name: 'sprintdesk_getTask', arguments: { taskId: 'SPD-1' } },
+    })).result.content[0].text).status, 'in-progress');
+    await testEvidenceOnlyHandoff(
+      tasksPath, join(tasksDirectory, '[SPD-1]_document-module.md'), startedTask,
+    );
     const submittedResponse = await handleRequest({
       jsonrpc: '2.0',
       id: 39,
@@ -295,7 +457,22 @@ Keep this note.
       jsonrpc: '2.0',
       id: 6,
       method: 'tools/call',
-      params: { name: 'sprintdesk_tasksComplete', arguments: { taskId: 'SPD-1' } },
+      params: {
+        name: 'sprintdesk_tasksComplete',
+        arguments: {
+          taskId: 'SPD-1',
+          evidence: [
+            {
+              criterion: 'Verify the first criterion.',
+              content: 'Generated focused test result.',
+            },
+            {
+              criterion: 'Verify the second criterion across a wrapped line.',
+              content: 'Generated documentation check result.',
+            },
+          ],
+        },
+      },
     });
     const underReviewTask = JSON.parse(completeResponse.result.content[0].text);
     assert.equal(underReviewTask.status, 'under-review');
@@ -312,6 +489,8 @@ Keep this note.
     assert.match(afterUnderReview, /Verify the second criterion across a wrapped line\./);
     assert.equal(afterUnderReview.match(/### Review Handoff/g)?.length, 1);
     assertSingleTaskTemplateHeaders(afterUnderReview);
+    assert.match(afterUnderReview, /Generated focused test result\./);
+    assert.match(afterUnderReview, /Generated documentation check result\./);
     assert.match(afterUnderReview, /Keep this description\./);
     assert.match(afterUnderReview, /Keep this note\./);
 
@@ -628,6 +807,12 @@ Keep this note.
 
 ## ✅ Acceptance Criteria
 - [ ] Keep this criterion.
+
+## Evidence
+
+### Criterion 1
+
+Package documentation evidence.
 `,
     );
     const addCompleteTaskToSprintResponse = await handleRequest({

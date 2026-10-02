@@ -11,6 +11,7 @@ import {
   receiptVerification,
   taskMetadata,
 } from '../review/authorization';
+import { assertCriterionEvidence, CriterionEvidence, renderCriterionEvidence } from '../review/evidence';
 
 const SPRINTDESK_DIR = '.SprintDesk';
 const SETTINGS_DIR = 'settings';
@@ -24,6 +25,58 @@ interface TaskTemplateField {
 export class DataService {
   private workspaceRoot: string;
   private configCache: Config | null = null;
+
+  private assertTaskReviewEvidence(task: Task, markdown?: string): void {
+    const markdownPath = task.path || path.join(this.getTasksDir(), this.getTaskFilename(task));
+    const taskMarkdown = markdown ?? this.readReviewFile(markdownPath);
+    assertCriterionEvidence(taskMarkdown, this.getTaskAcceptanceCriteria(task));
+  }
+
+  validateTaskReviewEvidence(taskId: string): void {
+    const task = this.getTask(taskId) || this.getTaskByCode(taskId);
+    if (!task) {
+      throw new Error('Review task not found');
+    }
+    this.assertTaskReviewEvidence(task);
+  }
+
+  recordTaskEvidence(taskId: string, evidence: CriterionEvidence[]): string {
+    const task = this.getTask(taskId) || this.getTaskByCode(taskId);
+    if (!task) {
+      throw new Error('Review task not found');
+    }
+    const markdownPath = task.path || path.join(this.getTasksDir(), this.getTaskFilename(task));
+    const markdown = this.readReviewFile(markdownPath);
+    const updatedMarkdown = renderCriterionEvidence(
+      markdown,
+      this.getTaskAcceptanceCriteria(task),
+      evidence,
+    );
+    this.assertTaskReviewEvidence(task, updatedMarkdown);
+    this.fileSystem.writeFile(markdownPath, updatedMarkdown);
+    return updatedMarkdown;
+  }
+
+  recordExecutionEvidence(
+    taskId: string, evidence: CriterionEvidence[],
+  ): { task: Task; markdown: string } {
+    const task = this.getTask(taskId) || this.getTaskByCode(taskId);
+    if (!task) {
+      throw new Error('Evidence task not found');
+    }
+    if (task.status !== 'in-progress') {
+      throw new Error('Execution evidence may only be recorded for in-progress tasks.');
+    }
+    const expected = this.recordTaskEvidence(task.id, evidence);
+    const markdownPath = task.path || path.join(this.getTasksDir(), this.getTaskFilename(task));
+    const markdown = this.readReviewFile(markdownPath);
+    const current = this.getTask(task.id);
+    if (markdown !== expected || !current || canonical(current) !== canonical(task)) {
+      throw new Error('Evidence readback does not match the saved content or task. Reconcile before retry.');
+    }
+    this.assertTaskReviewEvidence(current, markdown);
+    return { task: current, markdown };
+  }
 
   private get fileSystem(): IFileSystem {
     return getFileSystem();
@@ -396,6 +449,9 @@ export class DataService {
     if (Buffer.byteLength(markdown) > 1_000_000) {
       throw new Error('Task Markdown exceeds 1 MB');
     }
+    if (!task.reviewReceipt && !task.completionReceipt) {
+      this.assertTaskReviewEvidence(task, markdown);
+    }
 
     return {
       snapshot: {
@@ -480,7 +536,11 @@ export class DataService {
     const tasks = this.loadTasks();
     const index = tasks.findIndex(t => t.id === taskId);
     if (index !== -1) {
-      tasks[index] = { ...tasks[index], ...updates, updatedAt: new Date().toISOString() };
+      const updatedTask = { ...tasks[index], ...updates, updatedAt: new Date().toISOString() };
+      if (updatedTask.status === 'under-review' && tasks[index].status !== 'under-review') {
+        this.assertTaskReviewEvidence(updatedTask);
+      }
+      tasks[index] = updatedTask;
       this.saveTasks(tasks);
     }
   }

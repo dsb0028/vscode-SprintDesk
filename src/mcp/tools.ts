@@ -26,6 +26,31 @@ export const TASK_TOOLS = [
     },
   },
   {
+    name: 'sprintdesk_recordTaskEvidence',
+    description: 'Save exact ordered criterion evidence for an in-progress task and return persisted task/Markdown readback. Does not change status, work status, assignment, runs or approvals; submit under-review separately with sprintdesk_updateTask.',
+    inputSchema: {
+      type: 'object' as const,
+      additionalProperties: false,
+      properties: {
+        taskId: { type: 'string', description: 'Task ID or code' },
+        evidence: {
+          type: 'array',
+          description: 'One non-blank evidence entry per exact current acceptance criterion, in order.',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              criterion: { type: 'string', description: 'Exact acceptance criterion text' },
+              content: { type: 'string', description: 'Observed implementation and validation evidence' },
+            },
+            required: ['criterion', 'content'],
+          },
+        },
+      },
+      required: ['taskId', 'evidence'],
+    },
+  },
+  {
     name: 'sprintdesk_updateTask',
     description: 'Edit ordinary task metadata or submit under-review. Review decisions, Needs Modification, and done require the enrolled local reviewer UI, not caller-supplied verification.',
     inputSchema: {
@@ -445,15 +470,27 @@ export const TASK_WORK_TOOLS = [
   },
   {
     name: 'sprintdesk_tasksComplete',
-    description: 'Submit completed automated work for human review (sets task status to under-review and workStatus=review).',
+    description: 'Record exact per-criterion execution evidence, then submit completed automated work for human review (sets task status to under-review and workStatus=review).',
     inputSchema: {
       type: 'object' as const,
       properties: {
         taskId: { type: 'string', description: 'Task ID or code' },
         runId: { type: 'string', description: 'Optional run ID to mark completed' },
         result: { type: 'string', description: 'Optional run result summary' },
+        evidence: {
+          type: 'array',
+          description: 'One exact ordered evidence entry per acceptance criterion.',
+          items: {
+            type: 'object',
+            properties: {
+              criterion: { type: 'string', description: 'Exact acceptance criterion text' },
+              content: { type: 'string', description: 'Observed implementation and validation evidence' },
+            },
+            required: ['criterion', 'content'],
+          },
+        },
       },
-      required: ['taskId'],
+      required: ['taskId', 'evidence'],
     },
   },
   {

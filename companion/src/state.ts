@@ -3,6 +3,7 @@ import {
   canonical, digest, Enrollment, ReceiptPayload, ReviewSnapshot, SignedReceipt,
   SnapshotResponse, verifyReceipt
 } from '../../src/review/protocol';
+import { assertCriterionEvidence } from '../../src/review/evidence';
 
 export type Decision = 'met' | 'needs work' | 'needs-evidence';
 export interface Draft {
@@ -127,6 +128,7 @@ export function payload(root: LocalRoot, task: TaskLedger, snapshot: ReviewSnaps
   if (task.blocked || task.createdAt !== snapshot.createdAt) { throw new Error('Task identity blocked.'); }
   const draft = task.draft;
   const latest = task.operations[task.operations.length - 1]?.receipt;
+  assertCriterionEvidence(snapshot.markdown, snapshot.criteria);
   if (intent === 'review' && (!draft || draft.invalidated || draft.digest !== digest(snapshot)
     || draft.decisions.length !== snapshot.criteria.length
     || draft.decisions.some(d => d === 'needs-evidence')

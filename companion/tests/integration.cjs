@@ -37,7 +37,27 @@ async function run(workStatus, existingHandoff) {
     };
     ds.addTask(task);
     await fs.mkdir(path.dirname(mdPath), { recursive: true });
-    const markdown = '# 🧩 Task: Integration\n\n## 📋 Description\n\n## ✅ Acceptance Criteria\n- Tests pass\n- Docs accurate\n\n## 📝 Notes\nStable evidence\n';
+    const markdown = `# 🧩 Task: Integration
+
+## 📋 Description
+
+## ✅ Acceptance Criteria
+- Tests pass
+- Docs accurate
+
+## Evidence
+
+### Criterion 1
+
+Test result.
+
+### Criterion 2
+
+Documentation result.
+
+## 📝 Notes
+Stable evidence
+`;
     await fs.writeFile(mdPath, markdown, 'utf8');
     ds.updateTask(task.id, { status: 'under-review' });
     ds.saveTaskMd(ds.getTask(task.id));

@@ -44,6 +44,37 @@ re-enrollment. Evidence binds the task Markdown and selected repository-relative
 files by their actual text bytes. The reserved generated `### Review Handoff`
 block is a projection, not evidence; do not place evidence inside it.
 
+Before a task can enter `under-review`, provide a non-empty `## Evidence`
+section outside that generated handoff. It must contain exactly one ordered
+`### Criterion N` subsection for every acceptance criterion, beginning with
+`Criterion 1`; every subsection must contain non-whitespace evidence. Each
+subsection should identify the implementation or artifact, the command or
+inspection performed, observed result, and known limitation for its criterion.
+The parent rejects invalid handoffs, snapshots, and review commits; the
+companion refuses to sign them. Selected supplemental evidence files remain
+optional and cannot replace this task-local evidence section.
+
+For a status-only execution handoff, use `sprintdesk_recordTaskEvidence` with
+`taskId` and an ordered `evidence` array whose criterion text exactly matches
+the task's acceptance criteria. This operation accepts only `in-progress`
+tasks, writes only the Evidence section, and returns `{ task, markdown }`
+read from persisted state. It rejects missing, reordered, blank or malformed
+entries and unrelated lifecycle/run/approval arguments. Verify that readback
+against the intended evidence and unchanged task metadata, then re-read the
+task and submit with `sprintdesk_updateTask` using only `taskId` and
+`status: "under-review"`. The evidence operation does not change task status,
+work status, assignment, runs or approvals. It cannot repair evidence once a
+task is under review.
+
+Existing verified, current evidence needs no redundant write. Missing tool
+support or failed evidence persistence/readback blocks this handoff; do not
+replace it with file edits or a combined workflow. After uncertain delivery,
+inspect the persisted task Markdown and metadata before retrying.
+`sprintdesk_tasksComplete` remains a separate combined workflow: it requires
+the same exact ordered evidence, changes status to `under-review` and workStatus
+to `review`, and may complete a supplied run. It is not a substitute for the
+status-only handoff.
+
 Canonical JSON sorts object keys, preserves array order, excludes undefined
 object values, rejects non-finite numbers and unsupported values. SHA-256 binds
 the canonical snapshot. Ed25519 signs the complete canonical receipt payload.

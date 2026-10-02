@@ -73,6 +73,20 @@ failures do not require a replacement key: use **Retry public enrollment mirror
    rejects missing/ambiguous matches and duplicate IDs, and uses only the
    canonical ID for local drafts, receipts and snapshot requests. It never
    guesses by title. Read the complete plain-text snapshot.
+   Before the task may enter review, its Markdown must include a non-empty
+   `## Evidence` section outside `### Review Handoff`, with ordered
+   `### Criterion 1`, `### Criterion 2`, and subsequent subsections covering
+   every acceptance criterion. Each subsection needs actual non-whitespace
+   execution evidence; optional selected files supplement this section but
+   cannot replace it. Missing/stale evidence on an under-review task requires
+   execution-owner reconciliation, not reviewer writes or automatic reopening.
+   For a status-only handoff, the owner saves missing/stale evidence with
+   `sprintdesk_recordTaskEvidence` while the task is in-progress, verifies its
+   persisted task/Markdown readback, then submits with `sprintdesk_updateTask`
+   using only taskId/status. Existing verified current evidence needs no
+   redundant write. No evidence is invented from a generic run summary.
+   `sprintdesk_tasksComplete` is a separate combined workflow that also changes
+   work status and may complete a run; it is not a fallback for this handoff.
    Choose additional UTF-8 workspace evidence files if needed; actual
    `workspace.fs` bytes must match the snapshot, including encoding/BOM/line
    endings. Non-UTF-8 files are rejected. Choosing new evidence resets decisions.

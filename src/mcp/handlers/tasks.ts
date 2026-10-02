@@ -4,6 +4,7 @@ import { Task, TaskReview } from '../../data/types';
 import { DataService } from '../../data/DataService';
 import { getHost } from '../../host';
 import { SignedReceipt } from '../../review/protocol';
+import { CriterionEvidence } from '../../review/evidence';
 import { Handler, HandlerResult, res, getWs, getDs, findTask, resolveAgent, recordAudit } from './helpers';
 
 async function handle_sprintdesk_tasksAssign(args: any): Promise<HandlerResult> {
@@ -85,6 +86,37 @@ async function handle_sprintdesk_getTask(args: any): Promise<HandlerResult> {
   return res(JSON.stringify(task, null, 2));
 }
 
+function isEvidenceInput(
+  args: unknown,
+): args is { taskId: string; evidence: CriterionEvidence[] } {
+  if (typeof args !== 'object' || args === null || Array.isArray(args)
+    || Object.keys(args).some(key => key !== 'taskId' && key !== 'evidence')
+    || !('taskId' in args) || typeof args.taskId !== 'string' || !args.taskId.trim()
+    || !('evidence' in args) || !Array.isArray(args.evidence)) {
+    return false;
+  }
+  return args.evidence.every((entry: unknown) =>
+    typeof entry === 'object' && entry !== null && !Array.isArray(entry)
+    && Object.keys(entry).every(key => key === 'criterion' || key === 'content')
+    && 'criterion' in entry && typeof entry.criterion === 'string'
+    && 'content' in entry && typeof entry.content === 'string');
+}
+
+async function recordTaskEvidence(args: unknown): Promise<HandlerResult> {
+  if (!isEvidenceInput(args)) {
+    return res('Evidence arguments require only taskId and exact criterion/content entries; lifecycle, run and approval fields are not accepted.', true);
+  }
+  const ds = getDs();
+  if (!ds) {
+    return res('No workspace found', true);
+  }
+  try {
+    return res(JSON.stringify(ds.recordExecutionEvidence(args.taskId, args.evidence)));
+  } catch (error) {
+    return res(String(error), true);
+  }
+}
+
 async function handle_sprintdesk_updateTask(args: any): Promise<HandlerResult> {
   const ds = getDs();
   if (!ds) return res('No workspace found', true);
@@ -100,6 +132,11 @@ async function handle_sprintdesk_updateTask(args: any): Promise<HandlerResult> {
   if (args.title) updates.title = args.title;
   if (args.status) {
     if (args.status === 'under-review') {
+      try {
+        ds.validateTaskReviewEvidence(task.id);
+      } catch (error) {
+        return res(String(error), true);
+      }
       const review = buildReviewHandoff(task, ds);
       updates.review = review;
     }
@@ -205,6 +242,12 @@ async function handle_sprintdesk_tasksComplete(args: any): Promise<HandlerResult
   const task = findTask(ds, args.taskId);
   if (!task) return res(`Task not found: ${args.taskId}`, true);
 
+  try {
+    ds.recordTaskEvidence(task.id, args.evidence as CriterionEvidence[]);
+    ds.validateTaskReviewEvidence(task.id);
+  } catch (error) {
+    return res(String(error), true);
+  }
   ds.updateTask(task.id, {
     status: 'under-review',
     workStatus: 'review',
@@ -266,6 +309,7 @@ async function commitHumanReview(args: { receipt: SignedReceipt }): Promise<Hand
 export const TASK_HANDLERS: Record<string, Handler> = {
   sprintdesk_createTask: handle_sprintdesk_createTask,
   sprintdesk_getTask: handle_sprintdesk_getTask,
+  sprintdesk_recordTaskEvidence: recordTaskEvidence,
   sprintdesk_updateTask: handle_sprintdesk_updateTask,
   sprintdesk_deleteTask: handle_sprintdesk_deleteTask,
   sprintdesk_listTasks: handle_sprintdesk_listTasks,

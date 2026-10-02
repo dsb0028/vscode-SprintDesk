@@ -518,7 +518,7 @@ vscode.commands.registerCommand('sprintdesk.runAgent', async (item: any) => {
         stdio: { command: 'npm run mcp', cwd: '<workspace-root>' }
       },
       tools: {
-        task: ['sprintdesk_createTask', 'sprintdesk_getTask', 'sprintdesk_updateTask', 'sprintdesk_deleteTask', 'sprintdesk_listTasks', 'sprintdesk_searchTasks'],
+        task: ['sprintdesk_createTask', 'sprintdesk_getTask', 'sprintdesk_recordTaskEvidence', 'sprintdesk_updateTask', 'sprintdesk_deleteTask', 'sprintdesk_listTasks', 'sprintdesk_searchTasks'],
         workflow: ['sprintdesk_tasksClaim', 'sprintdesk_tasksComplete', 'sprintdesk_tasksAssign', 'sprintdesk_tasksUnassign'],
         epic: ['sprintdesk_createEpic', 'sprintdesk_getEpic', 'sprintdesk_updateEpic', 'sprintdesk_deleteEpic', 'sprintdesk_listEpics', 'sprintdesk_getTasksByEpic', 'sprintdesk_addTaskToEpic'],
         sprint: ['sprintdesk_createSprint', 'sprintdesk_getSprint', 'sprintdesk_updateSprint', 'sprintdesk_deleteSprint', 'sprintdesk_listSprints', 'sprintdesk_getTasksBySprint', 'sprintdesk_addTaskToSprint'],
@@ -551,6 +551,12 @@ Local MCP server for integrating SprintDesk with AI agents like Copilot, Claude,
 ### Task Tools
 - sprintdesk_createTask, sprintdesk_getTask, sprintdesk_updateTask, sprintdesk_deleteTask
 - sprintdesk_listTasks, sprintdesk_searchTasks
+- sprintdesk_recordTaskEvidence: save exact ordered evidence for an in-progress task without changing lifecycle, runs or approvals; returns persisted task/Markdown readback
+
+For a status-only review handoff, save and verify evidence first, then call
+sprintdesk_updateTask with only taskId and status: under-review. Missing or
+invalid evidence blocks that transition. sprintdesk_tasksComplete is a separate
+combined workflow that also changes workStatus and may complete a run.
 
 ### Epic Tools  
 - sprintdesk_createEpic, sprintdesk_getEpic, sprintdesk_updateEpic, sprintdesk_deleteEpic

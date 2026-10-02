@@ -1,5 +1,6 @@
 import { Task, TaskReview, HumanVerification } from '../data/types';
 import { canonical, digest, Enrollment, ReviewSnapshot, SignedReceipt, verifyReceipt } from './protocol';
+import { assertCriterionEvidence } from './evidence';
 
 export function receiptReview(receipt: SignedReceipt): TaskReview {
   const p = receipt.payload;
@@ -61,6 +62,7 @@ export function protectedChange(before: Task | undefined, after: Task): boolean 
 export function authorizeChange(
   before: Task, after: Task, snapshot: ReviewSnapshot, enrollment: Enrollment,
 ): void {
+  assertCriterionEvidence(snapshot.markdown, snapshot.criteria);
   const isCompletion = !same(before.completionReceipt, after.completionReceipt);
   const receipt = isCompletion ? after.completionReceipt : after.reviewReceipt;
   if (!receipt) {

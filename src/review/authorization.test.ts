@@ -9,6 +9,7 @@ import { setFileSystem, setHost } from '../host';
 import { NodeFileSystem } from '../host/NodeFileSystem';
 import { digest, keyId, ReceiptPayload, signReceipt, SignedReceipt, reviewedMarkdown } from './protocol';
 import { receiptReview } from './authorization';
+import { assertCriterionEvidence } from './evidence';
 import { getTaskService, updateTaskByPath } from '../services/taskService';
 
 const workspace = mkdtempSync(join(tmpdir(), 'sprintdesk-approval-'));
@@ -29,6 +30,39 @@ const task: Task = {
   updatedAt: '2026-01-01T00:00:00Z',
 };
 try {
+  assert.throws(() => assertCriterionEvidence('# Task', ['First']), /## Evidence/);
+  assert.throws(() => assertCriterionEvidence(`## Evidence
+
+### Criterion 1
+`, ['First']), /must not be blank/);
+  assert.throws(() => assertCriterionEvidence(`## Evidence
+
+### Criterion 2
+
+Wrong order.
+`, ['First']), /Criterion N/);
+  assert.throws(() => assertCriterionEvidence(`## Evidence
+
+### Criterion 1
+
+Covered.
+
+### Unmapped
+
+Extra evidence.
+`, ['First']), /Criterion N/);
+  assert.throws(() => assertCriterionEvidence(`## Evidence
+
+### Criterion 1
+
+Covered.
+
+## Evidence
+
+### Criterion 1
+
+Duplicate.
+`, ['First']), /exactly one/);
   mkdirSync(join(workspace, '.SprintDesk', 'data'), { recursive: true });
   ds.addTask(task);
   assert.throws(() => ds.updateTask(task.id, {
@@ -48,6 +82,35 @@ try {
   const markdownPath = join(ds.getTasksDir(), ds.getTaskFilename(task));
   assert.throws(() => updateTaskByPath(markdownPath, { status: 'done' }), /signed|approval|authorization/i);
   writeFileSync(markdownPath, '# Task\n\n## ✅ Acceptance Criteria\n- First\n- Second\n\n## 📝 Notes\nEvidence v1\n');
+  assert.throws(() => ds.updateTask(task.id, { status: 'under-review' }), /## Evidence/);
+  assert.equal(ds.getTask(task.id)?.status, 'waiting');
+  writeFileSync(markdownPath, `# Task
+
+## ✅ Acceptance Criteria
+- First
+- Second
+
+## Evidence
+
+### Criterion 1
+
+First observed result.
+
+### Criterion 2
+
+Second observed result.
+
+## 📝 Notes
+Evidence v1
+`);
+  assert.throws(() => ds.recordTaskEvidence(task.id, [
+    { criterion: 'Second', content: 'Out of order.' },
+    { criterion: 'First', content: 'Also out of order.' },
+  ]), /every exact acceptance criterion in order/);
+  assert.throws(() => ds.recordTaskEvidence(task.id, [
+    { criterion: 'First', content: '' },
+    { criterion: 'Second', content: 'Observed.' },
+  ]), /every exact acceptance criterion in order/);
   ds.updateTask(task.id, { status: 'under-review', review: {
     summary: 'pending', criteria: ds.getTaskAcceptanceCriteria(task).map(criterion => ({ criterion })),
   } });
@@ -63,6 +126,10 @@ try {
     keyId: keyId(publicKey), publicKey,
   };
   ds.enrollReview(enrollment);
+  const validMarkdown = readFileSync(markdownPath, 'utf8');
+  writeFileSync(markdownPath, validMarkdown.replace(/## Evidence[\s\S]*?(?=\n## |\s*$)/, ''));
+  assert.throws(() => ds.reviewSnapshot(task.id), /## Evidence/);
+  writeFileSync(markdownPath, validMarkdown);
   const snapshot = ds.reviewSnapshot(task.id).snapshot;
   assert.throws(() => ds.reviewSnapshot(task.id, ['../outside.txt']), /repository-relative/);
   assert.throws(() => ds.reviewSnapshot(task.id, ['/etc/passwd']), /repository-relative/);
@@ -169,7 +236,25 @@ try {
   ds.addTask(reworkTask);
   ds.saveTaskMd(reworkTask);
   const reworkMarkdownPath = join(ds.getTasksDir(), ds.getTaskFilename(reworkTask));
-  writeFileSync(reworkMarkdownPath, '# Task\n\n## ✅ Acceptance Criteria\n- First\n- Second\n\n## 📝 Notes\nEvidence v1\n');
+  writeFileSync(reworkMarkdownPath, `# Task
+
+## ✅ Acceptance Criteria
+- First
+- Second
+
+## Evidence
+
+### Criterion 1
+
+First observed result.
+
+### Criterion 2
+
+Second observed result.
+
+## 📝 Notes
+Evidence v1
+`);
   ds.updateTask(reworkTask.id, {
     status: 'under-review',
     review: {
