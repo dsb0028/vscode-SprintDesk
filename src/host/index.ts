@@ -48,3 +48,10 @@ export * from './ISecureStore';
 export { NodeHost } from './NodeHost';
 export { NodeFileSystem } from './NodeFileSystem';
 export { NodeSecureStore } from './NodeSecureStore';
+export {
+  NodeScopedEdits, ScopedEditError,
+} from './NodeScopedEdits';
+export type {
+  ScopedReadRequest, ScopedEditRequest, ScopedTarget, ScopedOperation,
+  ScopedLease, ScopedLeaseStatus, ScopedEditErrorCode,
+} from './NodeScopedEdits';
